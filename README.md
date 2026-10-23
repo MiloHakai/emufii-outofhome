@@ -210,7 +210,7 @@ and come say hi on [Discord](https://discord.gg/tvWcb28vBZ)!
 <br>
 
 **Contributors**<br>
-[@ThePastPlayer](https://github.com/ThePastPlayer) for his amazing work on DS local wireless and Emufii in general!
+[@ThePastPlayer](https://github.com/ThePastPlayer) for his amazing work on DS local wireless and Emufii !
 [@sofianeelhor](https://github.com/sofianeelhor) for the PPSSPP and ARMSX2 network automation<br>
 [@BrianJr03](https://github.com/BrianJr03) for the manual session setup and uncropped covers
 
