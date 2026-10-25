@@ -12,21 +12,96 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  opacity: 1;
-  transform: none;
-  transition: opacity 260ms ease-out, transform 320ms cubic-bezier(0.1, 0.9, 0.2, 1);
 }
 
-.screen.screen-entering {
-  opacity: 0;
-  transform: translateY(8px);
+/* View transitions: every screen, page and filter change is a cross-fade of GPU snapshots,
+   so nothing pops in a single frame. */
+:root {
+  --ease-glide: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.screen.screen-exiting {
-  opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 160ms ease-in, transform 160ms ease-in;
-  pointer-events: none;
+#screenHost {
+  view-transition-name: screen;
+}
+
+#appHeaderBand {
+  view-transition-name: header;
+}
+
+.library-viewport {
+  view-transition-name: library-view;
+}
+
+.library-hero {
+  view-transition-name: library-hero;
+}
+
+.settings-content {
+  view-transition-name: settings-page;
+}
+
+#floatingCloudPanel.open {
+  view-transition-name: floating-panel;
+}
+
+::view-transition-group(*) {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-glide);
+}
+
+::view-transition-old(*) {
+  animation: vt-fade-out 180ms ease-in both;
+}
+
+::view-transition-new(*) {
+  animation: vt-fade-in 300ms var(--ease-glide) both;
+}
+
+::view-transition-image-pair(root) {
+  isolation: auto;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+html[data-vt="theme"]::view-transition-old(root) {
+  animation: vt-fade-out 360ms ease both;
+}
+
+html[data-vt="theme"]::view-transition-new(root) {
+  animation: vt-fade-in 360ms ease both;
+}
+
+html[data-vt="screen"]::view-transition-new(screen) {
+  animation: vt-rise-in 340ms var(--ease-glide) both;
+}
+
+html[data-vt="screen"]::view-transition-old(screen) {
+  animation: vt-sink-out 180ms ease-in both;
+}
+
+::view-transition-new(library-view),
+::view-transition-new(settings-page) {
+  animation: vt-rise-in 320ms var(--ease-glide) both;
+}
+
+@keyframes vt-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes vt-fade-out {
+  to { opacity: 0; }
+}
+
+@keyframes vt-rise-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.995); }
+}
+
+@keyframes vt-sink-out {
+  to { opacity: 0; transform: scale(0.99); }
 }
 
 @keyframes fadeIn {
@@ -51,11 +126,24 @@ dialog::backdrop {
 }
 
 dialog[open] {
-  animation: dialog-in 240ms cubic-bezier(0.2, 0.9, 0.3, 1.12);
+  animation: dialog-in 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 dialog[open]::backdrop {
-  animation: fadeIn 200ms ease-out;
+  animation: fadeIn 220ms ease-out;
+  transition: opacity 170ms ease-in;
+}
+
+dialog[data-closing] {
+  animation: dialog-out 170ms ease-in forwards;
+}
+
+dialog[data-closing]::backdrop {
+  opacity: 0;
+}
+
+@keyframes dialog-out {
+  to { opacity: 0; transform: translateY(8px) scale(0.97); }
 }
 
 @keyframes dialog-in {

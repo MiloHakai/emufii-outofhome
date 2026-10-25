@@ -1510,9 +1510,9 @@ body[data-input="gamepad"] .list-row:focus {
     0 0 calc(var(--band) * 1.6) var(--band) color-mix(in srgb, var(--ring-a) 30%, transparent),
     0 0 calc(var(--band) * 3) var(--band) color-mix(in srgb, var(--ring-a) 16%, transparent);
   transition:
-    transform 320ms cubic-bezier(0.22, 1.2, 0.36, 1),
-    width 320ms cubic-bezier(0.22, 1.2, 0.36, 1),
-    height 320ms cubic-bezier(0.22, 1.2, 0.36, 1),
+    transform 320ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 320ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 320ms cubic-bezier(0.16, 1, 0.3, 1),
     border-radius 320ms ease,
     opacity 140ms ease,
     --band 140ms ease-out;

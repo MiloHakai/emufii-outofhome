@@ -2,6 +2,7 @@ import { store } from '../state.js';
 import { sfx } from '../sfx.js';
 import { t, getActiveLanguage } from '../i18n.js';
 import { esc } from '../html.js';
+import { withTransition } from '../motion.js';
 import { resolveTheme } from '../theme.js';
 import { ensureEmulator } from '../components/EmulatorDownloadModal.js';
 import { openUpdateModal } from '../components/UpdateModal.js';
@@ -199,7 +200,7 @@ function renderSettingsLayout(
       if (!next || next === currentView) return;
       sfx.play('click');
       currentView = next;
-      renderSettingsScreen(container);
+      withTransition(() => renderSettingsScreen(container));
       if (document.body.dataset.input !== 'mouse') {
         container.querySelector<HTMLElement>(`.settings-nav-item[data-settings-view="${next}"]`)?.focus({ preventScroll: true });
       }

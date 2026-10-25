@@ -2,6 +2,7 @@ import { store } from '../state.js';
 import { sfx } from '../sfx.js';
 import { esc, initials } from '../html.js';
 import { toast, errorMessage } from '../toast.js';
+import { withTransition } from '../motion.js';
 import { formatFriendCode, attachFriendCodeInputFormatter } from '../../../main/profile/friendCode.js';
 import { normalizeSessionCode } from '../../../main/network/sessionCodes.js';
 import type { OpenSession } from '../../../main/network/coordinator.js';
@@ -104,6 +105,9 @@ if (typeof window !== 'undefined') {
 export function toggleFloatingPanel(tab: FloatingTab) {
   if (isOpen && currentTab === tab) {
     closeFloatingPanel();
+  } else if (isOpen) {
+    // Morph the open panel into the next one rather than redrawing it in place.
+    withTransition(() => openFloatingPanel(tab), 'panel');
   } else {
     openFloatingPanel(tab);
   }
@@ -520,7 +524,7 @@ function attachSessionsListeners(panel: HTMLElement) {
   });
   panel.querySelector('#btnOpenJoinFromSessions')?.addEventListener('click', () => {
     sfx.play('click');
-    openFloatingPanel('join');
+    withTransition(() => openFloatingPanel('join'), 'panel');
   });
   panel.querySelectorAll<HTMLElement>('.btn-join-floating-session').forEach((btn) => {
     btn.addEventListener('click', () => connectToSession(btn.dataset.code || ''));

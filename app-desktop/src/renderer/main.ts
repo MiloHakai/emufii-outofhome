@@ -21,6 +21,7 @@ import { syncFriendsRealtime, encodeAvatarToWebpBase64 } from './js/components/F
 import { openUpdateModal } from './js/components/UpdateModal.js';
 import { closeContextMenu } from './js/contextMenu.js';
 import { toast } from './js/toast.js';
+import { withTransition, animateDialogClose } from './js/motion.js';
 
 const emuApi = (window as any).emufii;
 
@@ -216,6 +217,8 @@ async function bootstrap() {
   await sfx.init();
 
   nav.init({ onBack: goBack });
+  const sheet = document.getElementById('factSheetDialog') as HTMLDialogElement | null;
+  if (sheet) animateDialogClose(sheet);
   window.addEventListener('keydown', handleShortcuts);
   setupImageFallbacks();
   setupDragAndDrop();
@@ -338,29 +341,38 @@ async function bootstrap() {
   }
 
   let last = libraryKey(store.get());
+  let lastView = '';
   store.subscribe((state) => {
     updateHeader(state);
     document.body.classList.toggle('reduce-motion', state.settings.animations === false);
 
     const resolvedTheme = resolveTheme(state.settings.theme || 'dark');
     if (resolvedTheme !== document.body.dataset.theme) {
-      document.body.dataset.theme = resolvedTheme;
-      trayBackdrop?.update();
+      withTransition(() => {
+        document.body.dataset.theme = resolvedTheme;
+        trayBackdrop?.update();
+      }, 'theme');
     }
 
     const key = libraryKey(state);
     const libraryChanged = key !== last;
     last = key;
+    const viewKey = `${state.consoleFilter}|${state.settings.libraryLayout}|${state.settings.librarySort}`;
+    const viewChanged = viewKey !== lastView;
+    lastView = viewKey;
 
     if (currentRenderedScreen !== state.currentScreen) {
       currentRenderedScreen = state.currentScreen;
-      renderCurrentScreen(state.currentScreen, true);
+      const screen = state.currentScreen;
+      withTransition(() => renderCurrentScreen(screen), 'screen');
     } else if (currentRenderedScreen === 'library' && libraryChanged) {
-      renderCurrentScreen('library', false);
+      // Typing in the search box re-renders on every key: only cross-fade real view changes.
+      if (viewChanged) withTransition(() => renderCurrentScreen('library', false));
+      else renderCurrentScreen('library', false);
     }
   });
 
-  renderCurrentScreen('splash', true);
+  renderCurrentScreen('splash');
 }
 
 function libraryKey(state: AppState): string {
@@ -449,7 +461,7 @@ async function loadMetadataAndScan() {
   await rescanLibrary();
 }
 
-function renderCurrentScreen(screen: ScreenType, animate = true) {
+function renderCurrentScreen(screen: ScreenType, fresh = true) {
   if (cleanupCurrentScreen) {
     cleanupCurrentScreen();
     cleanupCurrentScreen = null;
@@ -466,21 +478,14 @@ function renderCurrentScreen(screen: ScreenType, animate = true) {
 
   let targetView: HTMLElement;
 
-  if (animate) {
-    const currentView = document.getElementById('currentScreenView');
-    if (currentView) {
-      currentView.id = '';
-      currentView.classList.add('screen-exiting');
-      currentView.setAttribute('inert', '');
-      setTimeout(() => currentView.remove(), 220);
-    }
-
+  if (fresh) {
+    // The old screen is captured by the view transition, so it can go right away.
+    document.getElementById('currentScreenView')?.remove();
     const newView = document.createElement('div');
-    newView.className = 'screen screen-entering';
+    newView.className = 'screen';
     newView.id = 'currentScreenView';
     host.appendChild(newView);
     targetView = newView;
-    requestAnimationFrame(() => newView.classList.remove('screen-entering'));
     setTimeout(() => nav.focusFirst(newView), 120);
   } else {
     let currentView = document.getElementById('currentScreenView');
@@ -505,7 +510,7 @@ function renderCurrentScreen(screen: ScreenType, animate = true) {
       cleanupCurrentScreen = renderSessionScreen(targetView) || null;
       break;
     case 'settings':
-      if (animate) resetSettingsView();
+      if (fresh) resetSettingsView();
       renderSettingsScreen(targetView);
       break;
   }
