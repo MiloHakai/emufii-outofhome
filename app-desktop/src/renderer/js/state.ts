@@ -2,7 +2,7 @@ import type { RomItem } from '../../main/library/scanner.js';
 import type { RemoteSession, WgTunnelInfo, FriendsReply } from '../../main/network/coordinator.js';
 import type { FriendRequestItem, SessionInviteEntry } from '../../main/library/storage.js';
 
-export type ScreenType = 'splash' | 'library' | 'join' | 'session' | 'friends' | 'finder' | 'settings';
+export type ScreenType = 'splash' | 'library' | 'session' | 'settings';
 
 export interface InPanelFriendNotice {
   type: 'request' | 'accepted' | 'invite' | 'online' | 'playing';

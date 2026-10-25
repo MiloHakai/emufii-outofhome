@@ -1,20 +1,41 @@
-import { store } from '../state.js';
+import { store, AppState } from '../state.js';
 import { sfx } from '../sfx.js';
+import { esc } from '../html.js';
+import { resolveTheme } from '../theme.js';
 import { openFactSheet } from '../components/FactSheet.js';
-import { extractCoverTone } from '../coverTone.js';
+import { openContextMenu, openContextMenuAt, MenuEntry } from '../contextMenu.js';
+import { promptText } from '../dialogs.js';
+import { toast } from '../toast.js';
 import type { RomItem } from '../../../main/library/scanner.js';
 
+type Layout = 'grid' | 'carousel' | 'list';
+type ConsoleGroup = { console: string; roms: RomItem[] };
+type Listen = (target: Window | HTMLElement, type: string, fn: (e: any) => void, opts?: AddEventListenerOptions) => void;
+
 let carouselIndex = 0;
+
+const CONSOLE_ORDER = ['3DS', 'PSP', 'DS', 'Switch', 'GameCube', 'Wii', 'PS2'];
+const CONSOLE_ART = new Set(['ps2', 'ds', 'three_ds', 'wii', 'psp', 'switch', 'gamecube']);
+
+const ICONS = {
+  open: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  host: '<rect x="2" y="3" width="9.5" height="7.5" rx="2"/><rect x="12.5" y="13.5" width="9.5" height="7.5" rx="2"/>',
+  join: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>',
+  rename: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  hide: '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/>',
+  folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+};
 
 function getConsoleSlug(consoleType: string): string {
   const map: Record<string, string> = {
     '3DS': 'three_ds',
-    'PSP': 'psp',
-    'DS': 'ds',
-    'Switch': 'switch',
-    'GameCube': 'gamecube',
-    'Wii': 'wii',
-    'PS2': 'ps2',
+    PSP: 'psp',
+    DS: 'ds',
+    Switch: 'switch',
+    GameCube: 'gamecube',
+    Wii: 'wii',
+    PS2: 'ps2',
   };
   return map[consoleType] || consoleType.toLowerCase();
 }
@@ -22,28 +43,28 @@ function getConsoleSlug(consoleType: string): string {
 export function getConsoleFriendlyName(consoleType: string): string {
   const map: Record<string, string> = {
     '3DS': 'Nintendo 3DS',
-    'DS': 'Nintendo DS',
-    'PSP': 'PlayStation Portable',
-    'PS2': 'PlayStation 2',
-    'Wii': 'Nintendo Wii',
-    'GameCube': 'Nintendo GameCube',
-    'Switch': 'Nintendo Switch',
+    DS: 'Nintendo DS',
+    PSP: 'PlayStation Portable',
+    PS2: 'PlayStation 2',
+    Wii: 'Nintendo Wii',
+    GameCube: 'Nintendo GameCube',
+    Switch: 'Nintendo Switch',
   };
   return map[consoleType] || consoleType;
 }
 
 export const EMUFII_PALETTE: [string, string][] = [
-  ['#3FCFC0', '#0E9C8F'], // Teal.bright to Teal.deep
-  ['#EE6FA3', '#C24B7E'], // Coral.bright to Coral.deep
-  ['#6B72E0', '#8E93EC'], // Violet to VioletDark
-  ['#1FA98B', '#0A4A44'], // GoodLight to Teal.ink
-  ['#C98A12', '#5A1D3E'], // WarnLight to Coral.ink
-  ['#5A8FD8', '#6B72E0'], // InfoLight to Violet
-  ['#F793BC', '#5A1D3E'], // Coral.darkBright to Coral.ink
-  ['#5CE0D2', '#0A4A44'], // Teal.darkBright to Teal.ink
-  ['#8E93EC', '#5A1D3E'], // VioletDark to Coral.ink
-  ['#C24B7E', '#0A4A44'], // Coral.deep to Teal.ink
-  ['#0E9C8F', '#5A1D3E'], // Teal.deep to Coral.ink
+  ['#3FCFC0', '#0E9C8F'],
+  ['#EE6FA3', '#C24B7E'],
+  ['#6B72E0', '#8E93EC'],
+  ['#1FA98B', '#0A4A44'],
+  ['#C98A12', '#5A1D3E'],
+  ['#5A8FD8', '#6B72E0'],
+  ['#F793BC', '#5A1D3E'],
+  ['#5CE0D2', '#0A4A44'],
+  ['#8E93EC', '#5A1D3E'],
+  ['#C24B7E', '#0A4A44'],
+  ['#0E9C8F', '#5A1D3E'],
 ];
 
 export function paletteFor(seed: string): [string, string] {
@@ -51,807 +72,813 @@ export function paletteFor(seed: string): [string, string] {
   for (let i = 0; i < seed.length; i++) {
     hash = (hash * 31 + seed.charCodeAt(i)) | 0;
   }
-  const idx = Math.abs(hash) % EMUFII_PALETTE.length;
-  return EMUFII_PALETTE[idx];
+  return EMUFII_PALETTE[Math.abs(hash) % EMUFII_PALETTE.length];
 }
 
 export function shortLabel(displayName: string): string {
-  const words = displayName.split(/[\s._-]+/).filter((w) => w.length > 0);
+  const words = displayName.split(/[\s._-]+/).filter((w) => /[a-z0-9]/i.test(w));
   if (words.length === 0) return '?';
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (words[0].slice(0, 1) + words[1].slice(0, 1)).toUpperCase();
+  return (words[0][0] + words[1][0]).toUpperCase();
 }
 
-export function getGridColumnCount(): number {
-  if (typeof window === 'undefined') return 8;
-  const gridWidth = Math.max(300, window.innerWidth - 64);
-  return Math.max(3, Math.floor((gridWidth + 16) / 124));
+export function romTitle(rom: RomItem): string {
+  return store.get().settings.customTitles?.[rom.id] || rom.displayName;
+}
+
+function consoleOf(rom: RomItem): string {
+  return (rom.console as string) === 'GBA' ? 'DS' : rom.console;
+}
+
+function isNoise(rom: RomItem): boolean {
+  const name = (rom.fileName || rom.displayName || '').toLowerCase();
+  return name.startsWith('photo') || name.includes('photos-') || name.includes('screenshot');
+}
+
+function parentDir(filePath: string): string {
+  const idx = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+  return idx > 0 ? filePath.slice(0, idx) : filePath;
+}
+
+export function setLibraryLayout(layout: Layout) {
+  const settings = store.get().settings;
+  if (settings.libraryLayout === layout) return;
+  sfx.play('click');
+  (window as any).emufii.config.updateSettings({ libraryLayout: layout });
+  store.set({ settings: { ...settings, libraryLayout: layout } });
+}
+
+function setLibrarySort(sort: AppState['settings']['librarySort']) {
+  const settings = store.get().settings;
+  (window as any).emufii.config.updateSettings({ librarySort: sort });
+  store.set({ settings: { ...settings, librarySort: sort } });
+}
+
+function visibleRoms(state: AppState): RomItem[] {
+  const { settings } = state;
+  return state.roms.filter((r) => {
+    if (settings.hiddenRoms.includes(r.id) || isNoise(r)) return false;
+    if (settings.hiddenConsoles?.includes(consoleOf(r))) return false;
+    if (settings.hideIncompatible && r.titleId && state.compatDb[r.titleId]?.playable === false) return false;
+    return true;
+  });
+}
+
+function filteredRoms(state: AppState): RomItem[] {
+  const query = state.searchQuery.trim().toLowerCase();
+  const titles = state.settings.customTitles || {};
+  const list = visibleRoms(state).filter((r) => {
+    if (state.consoleFilter !== 'ALL' && consoleOf(r) !== state.consoleFilter) return false;
+    if (!query) return true;
+    const haystack = [titles[r.id], r.displayName, r.fileName, r.console, r.titleId, r.productCode]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return query.split(/\s+/).every((q) => haystack.includes(q));
+  });
+
+  const titleOf = (r: RomItem) => titles[r.id] || r.displayName;
+  list.sort((a, b) => {
+    switch (state.settings.librarySort) {
+      case 'date':
+        return b.addedAt - a.addedAt;
+      case 'console':
+        return consoleOf(a).localeCompare(consoleOf(b)) || titleOf(a).localeCompare(titleOf(b));
+      default:
+        return titleOf(a).localeCompare(titleOf(b));
+    }
+  });
+  return list;
+}
+
+function consoleGroups(state: AppState): ConsoleGroup[] {
+  const map = new Map<string, RomItem[]>();
+  for (const r of visibleRoms(state)) {
+    const c = consoleOf(r);
+    if (!CONSOLE_ART.has(getConsoleSlug(c))) continue;
+    if (!map.has(c)) map.set(c, []);
+    map.get(c)!.push(r);
+  }
+  const rank = (c: string) => (CONSOLE_ORDER.includes(c) ? CONSOLE_ORDER.indexOf(c) : 99);
+  return [...map.entries()].map(([console, roms]) => ({ console, roms })).sort((a, b) => rank(a.console) - rank(b.console));
 }
 
 function renderCompatBadge(rating?: string | null): string {
   const r = rating || 'perfect';
-  if (r === 'perfect') {
-    return `
-      <div class="rom-compat-badge badge-perfect" title="Playable">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="20 6 9 17 4 12"/>
-        </svg>
-      </div>
-    `;
-  }
-  if (r === 'partial') {
-    return `
-      <div class="rom-compat-badge badge-partial" title="Ingame / Partial">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="1"/>
-          <line x1="12" y1="8" x2="12" y2="12"/>
-        </svg>
-      </div>
-    `;
-  }
-  if (r === 'broken') {
-    return `
-      <div class="rom-compat-badge badge-broken" title="Broken">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"/>
-          <line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </div>
-    `;
-  }
+  const variants: Record<string, { cls: string; title: string; path: string }> = {
+    perfect: { cls: 'badge-perfect', title: 'Playable online', path: '<polyline points="20 6 9 17 4 12"/>' },
+    partial: { cls: 'badge-partial', title: 'Partially working', path: '<line x1="12" y1="7" x2="12" y2="13"/><circle cx="12" cy="17" r="0.8"/>' },
+    broken: { cls: 'badge-broken', title: 'Not working online', path: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>' },
+  };
+  const v = variants[r] || { cls: 'badge-untested', title: 'Untested', path: '<path d="M5 12h14"/>' };
   return `
-    <div class="rom-compat-badge badge-untested" title="Untested">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M5 12h14"/>
-      </svg>
-    </div>
-  `;
+    <span class="rom-compat-badge ${v.cls}" title="${v.title}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${v.path}</svg>
+    </span>`;
 }
 
-export function renderLibraryScreen(container: HTMLElement) {
-  if ((container as any)._libraryCleanup) {
-    (container as any)._libraryCleanup();
-    (container as any)._libraryCleanup = null;
+function renderArtwork(r: RomItem, imgClass: string, placeholderClass = 'rom-placeholder-art'): string {
+  const title = romTitle(r);
+  const [c1, c2] = paletteFor(r.displayName);
+  return `
+    ${r.artworkUrl ? `<img src="${esc(r.artworkUrl)}" data-fallback="${esc(r.fallbackArtworkUrl || '')}" class="${imgClass}" alt="" loading="lazy" draggable="false">` : ''}
+    <div class="${placeholderClass}" data-img-fallback style="background: linear-gradient(135deg, ${c1}, ${c2});" ${r.artworkUrl ? 'hidden' : ''}>
+      <span class="rom-placeholder-initials">${esc(shortLabel(title))}</span>
+    </div>`;
+}
+
+function consoleThumb(consoleName: string, isLight: boolean): string {
+  const [c1, c2] = paletteFor(consoleName);
+  const slug = getConsoleSlug(consoleName);
+  return `
+    <span class="sidebar-thumb" style="background: linear-gradient(135deg, ${c1}, ${c2});">
+      <img src="assets/consoles/console_${slug}_${isLight ? 'light' : 'dark'}.webp" alt="" draggable="false">
+    </span>`;
+}
+
+function countLabel(n: number): string {
+  return `${n} ${n === 1 ? 'game' : 'games'}`;
+}
+
+function renderSidebar(state: AppState, isLight: boolean): string {
+  const groups = consoleGroups(state);
+  const total = visibleRoms(state).length;
+  const item = (id: string, label: string, count: number, thumb: string) => `
+    <button class="sidebar-item ${state.consoleFilter === id ? 'active' : ''}" data-filter="${esc(id)}" aria-current="${state.consoleFilter === id}">
+      ${thumb}
+      <span class="sidebar-label">${esc(label)}</span>
+      <span class="sidebar-count">${count}</span>
+    </button>`;
+
+  return `
+    <div class="sidebar-section-label">Library</div>
+    <nav class="sidebar-nav" aria-label="Consoles" data-own-arrows>
+      ${item(
+        'ALL',
+        'All games',
+        total,
+        '<span class="sidebar-thumb icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg></span>'
+      )}
+      ${groups.length ? '<div class="sidebar-section-label sub">Consoles</div>' : ''}
+      ${groups.map((g) => item(g.console, getConsoleFriendlyName(g.console), g.roms.length, consoleThumb(g.console, isLight))).join('')}
+    </nav>
+    <button class="sidebar-add" id="btnSidebarAdd">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <span>Add games</span>
+      <small>or drop files here</small>
+    </button>`;
+}
+
+function renderHero(rom: RomItem | null): string {
+  if (!rom) return '';
+  const [c1, c2] = paletteFor(rom.displayName);
+  const rating = rom.compatRating || 'perfect';
+  const compat = rating === 'broken' ? 'Not working online' : rating === 'partial' ? 'Partially working online' : 'Works online';
+  return `
+    <div class="hero-backdrop" style="--hero-a: ${c1}; --hero-b: ${c2};">
+      ${rom.artworkUrl ? `<img src="${esc(rom.artworkUrl)}" data-fallback="${esc(rom.fallbackArtworkUrl || '')}" alt="" draggable="false">` : ''}
+    </div>
+    <div class="hero-art">${renderArtwork(rom, 'rom-artwork')}</div>
+    <div class="hero-info">
+      <div class="hero-eyebrow">${esc(getConsoleFriendlyName(consoleOf(rom)))}</div>
+      <h2 class="hero-title">${esc(romTitle(rom))}</h2>
+      <div class="hero-meta">
+        <span class="hero-compat ${esc(rating)}">${compat}</span>
+        ${rom.titleId ? `<span>${esc(rom.titleId)}</span>` : ''}
+        ${rom.fileSizeBytes ? `<span>${(rom.fileSizeBytes / 1024 / 1024 / 1024).toFixed(rom.fileSizeBytes > 1024 ** 3 ? 1 : 2)} GB</span>` : ''}
+      </div>
+    </div>
+    <div class="hero-actions">
+      <button class="btn-primary plate-button" id="btnHeroPlay" data-rom-id="${esc(rom.id)}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg>
+        Play
+      </button>
+      <button class="hero-more plate-button" id="btnHeroMore" title="More actions" aria-label="More actions">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+      </button>
+    </div>`;
+}
+
+function renderGridItems(roms: RomItem[]): string {
+  return roms
+    .map(
+      (r) => `
+    <div class="rom-cell" data-rom-id="${esc(r.id)}" role="button" tabindex="0" title="${esc(romTitle(r))}">
+      <div class="rom-artwork-wrap">
+        ${renderArtwork(r, 'rom-artwork')}
+        <span class="rom-tile-badge">${esc(r.console)}</span>
+        ${renderCompatBadge(r.compatRating)}
+      </div>
+      <div class="rom-title">${esc(romTitle(r))}</div>
+    </div>`
+    )
+    .join('');
+}
+
+function renderListItems(roms: RomItem[]): string {
+  return roms
+    .map(
+      (r) => `
+    <div class="list-row" data-rom-id="${esc(r.id)}" role="button" tabindex="0">
+      <div class="list-row-art">${renderArtwork(r, 'rom-artwork', 'rom-placeholder-art small')}</div>
+      <div class="list-row-text">
+        <div class="list-row-title">${esc(romTitle(r))}</div>
+        <div class="list-row-sub">${esc(getConsoleFriendlyName(consoleOf(r)))}${r.titleId ? ` · ${esc(r.titleId)}` : ''}</div>
+      </div>
+      ${renderCompatBadge(r.compatRating)}
+      <span class="rom-tile-badge static">${esc(r.console)}</span>
+      <svg class="list-row-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>`
+    )
+    .join('');
+}
+
+function renderRoms(state: AppState, roms: RomItem[], layout: Layout): string {
+  if (layout === 'carousel') {
+    return `
+      <div class="carousel-container" data-own-arrows="x">
+        <div class="roms-carousel-track" id="carouselTrack">
+          ${roms
+            .map(
+              (r, idx) => `
+            <div class="carousel-card ${idx === carouselIndex ? 'active' : 'neighbor'}" data-rom-id="${esc(r.id)}" data-index="${idx}" role="button" tabindex="${idx === carouselIndex ? 0 : -1}" aria-label="${esc(romTitle(r))}">
+              <span class="cursor-ring static" aria-hidden="true"></span>
+              <div class="carousel-artwork-wrap">
+                ${renderArtwork(r, 'rom-artwork')}
+                <span class="rom-tile-badge">${esc(r.console)}</span>
+                ${renderCompatBadge(r.compatRating)}
+              </div>
+              <div class="carousel-title">${esc(romTitle(r))}</div>
+            </div>`
+            )
+            .join('')}
+        </div>
+      </div>`;
   }
-  const state = store.get();
-  const emuApi = (window as any).emufii;
-  const isLight =
-    state.settings.theme === 'day' ||
-    state.settings.theme === 'light' ||
-    (state.settings.theme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
-  let cleanup: (() => void) | null = null;
 
-  // Filter ROMs
-  let filtered = state.roms.filter((r) => {
-    if (state.settings.hiddenRoms.includes(r.id)) return false;
-    const nameLow = (r.fileName || r.displayName || '').toLowerCase();
-    if (nameLow.startsWith('photo') || nameLow.includes('photos-') || nameLow.includes('screenshot')) return false;
-    const romConsole = (r.console as string) === 'GBA' ? 'DS' : r.console;
-    if (state.settings.hiddenConsoles && state.settings.hiddenConsoles.includes(romConsole)) return false;
-    if (state.settings.hideIncompatible && r.titleId && state.compatDb[r.titleId]?.playable === false) {
-      return false;
-    }
-    if (state.consoleFilter !== 'ALL' && romConsole !== state.consoleFilter) return false;
-    return true;
-  });
+  const wrap = (items: string) => (layout === 'list' ? `<div class="roms-list">${items}</div>` : `<div class="roms-grid">${items}</div>`);
+  const items = layout === 'list' ? renderListItems : renderGridItems;
 
-  // Sort ROMs
-  filtered.sort((a, b) => {
-    const titleA = state.settings.customTitles[a.id] || a.displayName;
-    const titleB = state.settings.customTitles[b.id] || b.displayName;
-    if (state.settings.librarySort === 'az') return titleA.localeCompare(titleB);
-    if (state.settings.librarySort === 'date') return b.addedAt - a.addedAt;
-    if (state.settings.librarySort === 'console') {
-      const cA = (a.console as string) === 'GBA' ? 'DS' : a.console;
-      const cB = (b.console as string) === 'GBA' ? 'DS' : b.console;
-      return cA.localeCompare(cB);
-    }
-    return 0;
-  });
+  // "All games" sorted by console reads best as one titled section per console.
+  const sectioned = state.consoleFilter === 'ALL' && !state.searchQuery.trim() && state.settings.librarySort === 'console';
+  if (!sectioned) return wrap(items(roms));
 
-  const shouldShowFolders =
-    state.consoleFilter === 'ALL' &&
-    !state.searchQuery.trim();
-
-  let totalItems = filtered.length;
-  if (shouldShowFolders) {
-    const supportedWebps = ['ps2', 'ds', 'three_ds', 'wii', 'psp', 'switch', 'gamecube'];
-    const groupCount = state.roms.reduce((acc, r) => {
-      const nameLow = (r.fileName || r.displayName || '').toLowerCase();
-      if (nameLow.startsWith('photo') || nameLow.includes('photos-') || nameLow.includes('screenshot')) return acc;
-      if (!state.settings.hiddenRoms.includes(r.id)) {
-        const c = (r.console as string) === 'GBA' ? 'DS' : r.console;
-        if (state.settings.hiddenConsoles?.includes(c)) return acc;
-        if (supportedWebps.includes(getConsoleSlug(c))) {
-          acc.add(c);
-        }
-      }
-      return acc;
-    }, new Set<string>()).size;
-    totalItems = groupCount;
+  const sections = new Map<string, RomItem[]>();
+  for (const r of roms) {
+    const c = consoleOf(r);
+    if (!sections.has(c)) sections.set(c, []);
+    sections.get(c)!.push(r);
   }
+  return [...sections.entries()]
+    .map(
+      ([c, list]) => `
+      <section class="library-section">
+        <h3 class="library-section-title">${esc(getConsoleFriendlyName(c))}<span>${list.length}</span></h3>
+        ${wrap(items(list))}
+      </section>`
+    )
+    .join('');
+}
 
-  if (carouselIndex >= totalItems) {
-    carouselIndex = Math.max(0, totalItems - 1);
-  }
+function renderEmptyLibrary(): string {
+  return `
+    <div class="library-empty">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
+      <h2>Your library is empty</h2>
+      <p>Add game files (.iso, .rvz, .3ds, .nds, .nsp, .cso…) or a whole folder. You can also drag and drop them anywhere in this window.</p>
+      <div class="library-empty-actions">
+        <button class="btn-primary plate-button" id="btnAddRomFile">Add game files</button>
+        <button class="btn-secondary plate-button" id="btnAddRomDir">Add a folder</button>
+      </div>
+    </div>`;
+}
 
-  const existingViewport = container.querySelector('#libraryViewport');
-  if (!existingViewport) {
-    container.innerHTML = `
-      <!-- Library Toolbar: View Controls on Right -->
-      <div class="library-toolbar" style="justify-content: flex-end;">
-        <div class="view-controls">
-          <button class="icon-btn ${state.settings.libraryLayout === 'grid' ? 'active' : ''}" id="btnLayoutGrid" title="Grid View">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
-          </button>
-          <button class="icon-btn ${state.settings.libraryLayout === 'carousel' ? 'active' : ''}" id="btnLayoutCarousel" title="Carousel View">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="3" width="10" height="18" rx="2"/><rect x="2" y="6" width="3" height="12" rx="1" opacity="0.4"/><rect x="19" y="6" width="3" height="12" rx="1" opacity="0.4"/></svg>
-          </button>
-          <button class="icon-btn ${state.settings.libraryLayout === 'list' ? 'active' : ''}" id="btnLayoutList" title="List View">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="4" width="18" height="4" rx="1.5"/><rect x="3" y="10" width="18" height="4" rx="1.5"/><rect x="3" y="16" width="18" height="4" rx="1.5"/></svg>
-          </button>
+function renderNoResults(state: AppState): string {
+  const where = state.consoleFilter === 'ALL' ? '' : ` in ${esc(getConsoleFriendlyName(state.consoleFilter))}`;
+  return `
+    <div class="library-empty compact">
+      <h3>${state.searchQuery.trim() ? `No match for “${esc(state.searchQuery.trim())}”${where}` : `No games${where}`}</h3>
+      <div class="library-empty-actions">
+        ${state.searchQuery.trim() ? '<button class="btn-secondary plate-button" id="btnClearSearch">Clear search</button>' : ''}
+        ${state.consoleFilter !== 'ALL' ? '<button class="btn-secondary plate-button" id="btnBackToConsoles">Show all games</button>' : ''}
+      </div>
+    </div>`;
+}
+
+function renderViewport(state: AppState, roms: RomItem[]): string {
+  if (visibleRoms(state).length === 0) return renderEmptyLibrary();
+  return roms.length ? renderRoms(state, roms, state.settings.libraryLayout as Layout) : renderNoResults(state);
+}
+
+function renderToolbar(state: AppState): string {
+  const { libraryLayout: layout, librarySort: sort } = state.settings;
+  const layoutBtn = (id: Layout, title: string, key: string, icon: string) => `
+    <button class="icon-btn ${layout === id ? 'active' : ''}" data-layout-btn="${id}" title="${title} (Ctrl+${key})" aria-pressed="${layout === id}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">${icon}</svg>
+    </button>`;
+
+  return `
+    <div class="library-toolbar">
+      <label class="search-slab">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="search" id="librarySearch" placeholder="Search games" value="${esc(state.searchQuery)}" autocomplete="off" spellcheck="false">
+        <kbd class="search-kbd">Ctrl F</kbd>
+      </label>
+      <div class="library-toolbar-right">
+        <label class="sort-select" title="Sort games">
+          <span>Sort</span>
+          <select id="librarySort">
+            <option value="console" ${sort === 'console' ? 'selected' : ''}>Console</option>
+            <option value="az" ${sort === 'az' ? 'selected' : ''}>A – Z</option>
+            <option value="date" ${sort === 'date' ? 'selected' : ''}>Recently added</option>
+          </select>
+        </label>
+        <div class="view-controls" role="group" aria-label="Layout">
+          ${layoutBtn('grid', 'Grid', '1', '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>')}
+          ${layoutBtn('carousel', 'Carousel', '2', '<rect x="7" y="3" width="10" height="18" rx="2"/><rect x="2" y="6" width="3" height="12" rx="1" opacity="0.4"/><rect x="19" y="6" width="3" height="12" rx="1" opacity="0.4"/>')}
+          ${layoutBtn('list', 'List', '3', '<rect x="3" y="4" width="18" height="4" rx="1.5"/><rect x="3" y="10" width="18" height="4" rx="1.5"/><rect x="3" y="16" width="18" height="4" rx="1.5"/>')}
         </div>
       </div>
+    </div>`;
+}
 
-      <!-- Main Content Area -->
-      <div class="library-viewport" id="libraryViewport">
-        ${renderViewport(state, filtered, isLight)}
+async function addRomFiles() {
+  const emuApi = (window as any).emufii;
+  const selected = await emuApi.dialog.selectRomFiles();
+  if (!selected?.length) return;
+  const dirs = store.get().settings.romDirectories || [];
+  const targetDir = dirs[0] || (await emuApi.library.getSpecialRomDirectory())?.path;
+  const res = await emuApi.library.importRomFiles(selected, targetDir);
+  const scanned = await emuApi.library.scan();
+  const config = await emuApi.config.get();
+  store.set({ roms: scanned, settings: { ...store.get().settings, romDirectories: config.settings.romDirectories } });
+  if (res?.count) toast(`Imported ${res.count} ${res.count === 1 ? 'game' : 'games'}`, 'success', 2500);
+}
+
+async function addRomFolder() {
+  const emuApi = (window as any).emufii;
+  const selected = await emuApi.dialog.selectDirectory();
+  if (!selected) return;
+  await emuApi.library.addDirectory(selected);
+  const scanned = await emuApi.library.scan();
+  const config = await emuApi.config.get();
+  store.set({ roms: scanned, settings: { ...store.get().settings, romDirectories: config.settings.romDirectories } });
+}
+
+function romMenu(rom: RomItem): MenuEntry[] {
+  const emuApi = (window as any).emufii;
+  const hasCustomTitle = !!store.get().settings.customTitles?.[rom.id];
+  return [
+    { label: 'Open', icon: ICONS.open, hint: 'Enter', action: () => openFactSheet(rom) },
+    'separator',
+    {
+      label: 'Rename…',
+      icon: ICONS.rename,
+      hint: 'F2',
+      action: () => renameRom(rom),
+    },
+    ...(hasCustomTitle
+      ? [
+          {
+            label: 'Restore original title',
+            icon: ICONS.rename,
+            action: async () => {
+              await emuApi.config.renameRom(rom.id, '');
+              const config = await emuApi.config.get();
+              store.set({ settings: { ...store.get().settings, customTitles: config.settings.customTitles } });
+            },
+          } as MenuEntry,
+        ]
+      : []),
+    { label: 'Copy title', icon: ICONS.copy, action: () => navigator.clipboard.writeText(romTitle(rom)) },
+    { label: 'Show in folder', icon: ICONS.folder, action: () => emuApi.library.openPath(parentDir(rom.filePath)) },
+    'separator',
+    {
+      label: 'Hide from library',
+      icon: ICONS.hide,
+      hint: 'Del',
+      danger: true,
+      action: () => hideRom(rom),
+    },
+  ];
+}
+
+async function renameRom(rom: RomItem) {
+  const emuApi = (window as any).emufii;
+  const value = await promptText({
+    title: 'Rename game',
+    description: `Original title: ${rom.displayName}. Leave empty to restore it.`,
+    value: romTitle(rom),
+    placeholder: rom.displayName,
+    maxLength: 120,
+  });
+  if (value === null) return;
+  await emuApi.config.renameRom(rom.id, value === rom.displayName ? '' : value);
+  const config = await emuApi.config.get();
+  store.set({ settings: { ...store.get().settings, customTitles: config.settings.customTitles } });
+}
+
+async function hideRom(rom: RomItem) {
+  const emuApi = (window as any).emufii;
+  await emuApi.config.toggleHideRom(rom.id);
+  const config = await emuApi.config.get();
+  store.set({ settings: { ...store.get().settings, hiddenRoms: config.settings.hiddenRoms } });
+  toast(`“${romTitle(rom)}” is hidden. Restore it from Settings › Library.`, 'info');
+}
+
+// The neon cursor glides between games, following the mouse or the keyboard focus (CursorRing.kt).
+function setupCursor(viewport: HTMLElement, onTarget: (romId: string) => void, on: Listen): () => void {
+  const cursor = document.createElement('div');
+  cursor.className = 'cursor-ring';
+  cursor.setAttribute('aria-hidden', 'true');
+  viewport.appendChild(cursor);
+
+  let current: HTMLElement | null = null;
+  let frame = 0;
+
+  const surfaceOf = (cell: HTMLElement) => cell.querySelector<HTMLElement>('.rom-artwork-wrap') || cell;
+
+  const place = (cell: HTMLElement | null) => {
+    if (!cell || !viewport.contains(cell)) {
+      current = null;
+      cursor.classList.remove('visible');
+      return;
+    }
+    const wasHidden = !cursor.classList.contains('visible');
+    const surface = surfaceOf(cell);
+    const vp = viewport.getBoundingClientRect();
+    const r = surface.getBoundingClientRect();
+    const x = r.left - vp.left + viewport.scrollLeft;
+    const y = r.top - vp.top + viewport.scrollTop;
+    const band = Math.round(Math.min(16, Math.max(6, Math.min(r.width, r.height) * 0.1)));
+
+    cursor.classList.toggle('snap', wasHidden);
+    cursor.style.setProperty('--x', `${x}px`);
+    cursor.style.setProperty('--y', `${y}px`);
+    cursor.style.setProperty('--w', `${r.width}px`);
+    cursor.style.setProperty('--h', `${r.height}px`);
+    cursor.style.setProperty('--r', getComputedStyle(surface).borderTopLeftRadius);
+    cursor.style.setProperty('--band-size', `${band}px`);
+    if (wasHidden) void cursor.offsetWidth;
+    cursor.classList.add('visible');
+    cursor.classList.remove('snap');
+
+    if (cell !== current) {
+      current = cell;
+      if (cell.dataset.romId) onTarget(cell.dataset.romId);
+    }
+  };
+
+  const cellOf = (el: EventTarget | null) => (el as HTMLElement | null)?.closest?.<HTMLElement>('.rom-cell, .list-row') || null;
+  const focusedCell = () => cellOf(document.activeElement);
+
+  on(viewport, 'pointerover', (e: PointerEvent) => {
+    const cell = cellOf(e.target);
+    if (cell && cell !== current) {
+      if (cell !== focusedCell()) sfx.play('hover');
+      place(cell);
+    }
+  });
+  on(viewport, 'pointerleave', () => place(focusedCell()));
+  on(viewport, 'focusin', (e: FocusEvent) => place(cellOf(e.target)));
+  on(viewport, 'focusout', () => requestAnimationFrame(() => !viewport.matches(':hover') && place(focusedCell())));
+
+  const replace = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => current && place(current));
+  };
+  const ro = new ResizeObserver(replace);
+  ro.observe(viewport);
+
+  const initial = focusedCell();
+  if (initial) place(initial);
+
+  return () => {
+    ro.disconnect();
+    cancelAnimationFrame(frame);
+  };
+}
+
+let heroRomId: string | null = null;
+
+export function renderLibraryScreen(container: HTMLElement) {
+  const prevCleanup = (container as any)._libraryCleanup;
+  if (prevCleanup) prevCleanup();
+
+  const state = store.get();
+  const isLight = resolveTheme(state.settings.theme) === 'light';
+  const layout = state.settings.libraryLayout as Layout;
+  const roms = filteredRoms(state);
+  carouselIndex = Math.max(0, Math.min(carouselIndex, roms.length - 1));
+
+  const cleanups: (() => void)[] = [];
+  const on: Listen = (target, type, fn, opts) => {
+    target.addEventListener(type, fn as EventListener, opts);
+    cleanups.push(() => target.removeEventListener(type, fn as EventListener, opts));
+  };
+
+  let viewport = container.querySelector<HTMLElement>('#libraryViewport');
+  if (!viewport) {
+    container.innerHTML = `
+      <div class="library-shell">
+        <aside class="library-sidebar" id="librarySidebar"></aside>
+        <section class="library-main">
+          ${renderToolbar(state)}
+          <div class="library-hero" id="libraryHero"></div>
+          <div class="library-viewport" id="libraryViewport" data-layout="${layout}"></div>
+        </section>
       </div>
     `;
+    viewport = container.querySelector<HTMLElement>('#libraryViewport')!;
 
-    // Layout switcher
-    container.querySelector('#btnLayoutGrid')?.addEventListener('click', (e) => {
-      sfx.play('click');
-      (e.currentTarget as HTMLElement).blur();
-      emuApi.config.updateSettings({ libraryLayout: 'grid' });
-      const currentSettings = store.get().settings;
-      store.set({ settings: { ...currentSettings, libraryLayout: 'grid' } });
+    const search = container.querySelector<HTMLInputElement>('#librarySearch')!;
+    search.addEventListener('input', () => {
+      carouselIndex = 0;
+      store.set({ searchQuery: search.value });
     });
-
-    container.querySelector('#btnLayoutCarousel')?.addEventListener('click', (e) => {
-      sfx.play('click');
-      (e.currentTarget as HTMLElement).blur();
-      emuApi.config.updateSettings({ libraryLayout: 'carousel' });
-      const currentSettings = store.get().settings;
-      store.set({ settings: { ...currentSettings, libraryLayout: 'carousel' } });
-    });
-
-    container.querySelector('#btnLayoutList')?.addEventListener('click', (e) => {
-      sfx.play('click');
-      (e.currentTarget as HTMLElement).blur();
-      emuApi.config.updateSettings({ libraryLayout: 'list' });
-      const currentSettings = store.get().settings;
-      store.set({ settings: { ...currentSettings, libraryLayout: 'list' } });
-    });
-  } else {
-    // Toolbar already exists: update view buttons and viewport
-    container.querySelector('#btnLayoutGrid')?.classList.toggle('active', state.settings.libraryLayout === 'grid');
-    container.querySelector('#btnLayoutCarousel')?.classList.toggle('active', state.settings.libraryLayout === 'carousel');
-    container.querySelector('#btnLayoutList')?.classList.toggle('active', state.settings.libraryLayout === 'list');
-
-    existingViewport.innerHTML = renderViewport(state, filtered, isLight);
-  }
-
-  // Attach viewport listeners (Folder tiles, ROMs, Carousel gestures & wheel)
-  const cleanups: (() => void)[] = [];
-
-  // Console folder tile clicks
-  container.querySelectorAll<HTMLElement>('.folder-tile').forEach((tile) => {
-    tile.addEventListener('click', (e) => {
-      sfx.play('click');
-      const targetConsole = (e.currentTarget as HTMLElement).dataset.console;
-      if (targetConsole) {
-        carouselIndex = 0;
-        store.set({ consoleFilter: targetConsole });
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && search.value) {
+        e.preventDefault();
+        search.value = '';
+        store.set({ searchQuery: '' });
+      } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        const first = container.querySelector<HTMLElement>('.rom-cell, .list-row, .carousel-card.active');
+        if (first) {
+          e.preventDefault();
+          first.focus();
+          if (e.key === 'Enter' && store.get().searchQuery.trim()) first.click();
+        }
       }
     });
+
+    container.querySelector<HTMLSelectElement>('#librarySort')?.addEventListener('change', (e) => {
+      setLibrarySort((e.target as HTMLSelectElement).value as AppState['settings']['librarySort']);
+    });
+
+    container.querySelectorAll<HTMLElement>('[data-layout-btn]').forEach((btn) => {
+      btn.addEventListener('click', () => setLibraryLayout(btn.dataset.layoutBtn as Layout));
+    });
+
+    const sidebar = container.querySelector<HTMLElement>('#librarySidebar')!;
+    sidebar.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+      const item = target.closest<HTMLElement>('[data-filter]');
+      if (item) {
+        const filter = item.dataset.filter || 'ALL';
+        if (filter !== store.get().consoleFilter) {
+          sfx.play('click');
+          carouselIndex = 0;
+          store.set({ consoleFilter: filter });
+        }
+        return;
+      }
+      if (target.closest('#btnSidebarAdd')) {
+        sfx.play('click');
+        openContextMenuAt(target.closest('#btnSidebarAdd') as HTMLElement, [
+          { label: 'Add game files…', icon: ICONS.copy, action: addRomFiles },
+          { label: 'Add a folder…', icon: ICONS.folder, action: addRomFolder },
+        ]);
+      }
+    });
+    sidebar.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      const items = Array.from(sidebar.querySelectorAll<HTMLElement>('[data-filter]'));
+      const idx = items.indexOf(document.activeElement as HTMLElement);
+      if (idx < 0) return;
+      e.preventDefault();
+      items[(idx + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+    });
+  } else {
+    container.querySelectorAll<HTMLElement>('[data-layout-btn]').forEach((btn) => {
+      const active = btn.dataset.layoutBtn === layout;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
+    const sortSelect = container.querySelector<HTMLSelectElement>('#librarySort');
+    if (sortSelect) sortSelect.value = state.settings.librarySort;
+    const search = container.querySelector<HTMLInputElement>('#librarySearch');
+    if (search && search.value !== state.searchQuery) search.value = state.searchQuery;
+  }
+
+  const sidebar = container.querySelector<HTMLElement>('#librarySidebar')!;
+  const sidebarFocus = sidebar.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.filter : null;
+  sidebar.innerHTML = renderSidebar(state, isLight);
+  if (sidebarFocus) sidebar.querySelector<HTMLElement>(`[data-filter="${CSS.escape(sidebarFocus)}"]`)?.focus({ preventScroll: true });
+
+  const hadFocusInViewport = viewport.contains(document.activeElement);
+  const focusedKey = (document.activeElement as HTMLElement | null)?.dataset?.romId;
+  const viewKey = `${state.consoleFilter}|${state.searchQuery}|${layout}`;
+  const keepScroll = viewport.dataset.viewKey === viewKey ? viewport.scrollTop : 0;
+  viewport.dataset.layout = layout;
+  viewport.dataset.viewKey = viewKey;
+  viewport.innerHTML = renderViewport(state, roms);
+  viewport.scrollTop = keepScroll;
+  if (hadFocusInViewport && focusedKey) {
+    viewport.querySelector<HTMLElement>(`[data-rom-id="${CSS.escape(focusedKey)}"]`)?.focus({ preventScroll: true });
+  }
+
+  const romById = (id?: string | null) => state.roms.find((r) => r.id === id);
+
+  const hero = container.querySelector<HTMLElement>('#libraryHero')!;
+  const showHero = (id: string | null) => {
+    const rom = romById(id) || roms[0] || null;
+    hero.hidden = !rom;
+    if (!rom || hero.dataset.romId === rom.id) return;
+    heroRomId = rom.id;
+    hero.dataset.romId = rom.id;
+    hero.classList.remove('swap');
+    void hero.offsetWidth;
+    hero.classList.add('swap');
+    hero.innerHTML = renderHero(rom);
+  };
+  hero.dataset.romId = '';
+  showHero(roms.some((r) => r.id === heroRomId) ? heroRomId : null);
+
+  on(hero, 'click', (e: MouseEvent) => {
+    const rom = romById(hero.dataset.romId);
+    if (!rom) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('#btnHeroPlay')) {
+      sfx.play('click');
+      openFactSheet(rom);
+    } else if (target.closest('#btnHeroMore')) {
+      sfx.play('click');
+      openContextMenuAt(target.closest('#btnHeroMore') as HTMLElement, romMenu(rom));
+    }
   });
 
-  // Back to All Consoles button
-  container.querySelector('#btnBackToConsoles')?.addEventListener('click', () => {
+  const activate = (el: HTMLElement) => {
+    const rom = romById(el.dataset.romId);
+    if (rom) {
+      sfx.play('click');
+      openFactSheet(rom);
+    }
+  };
+
+  const isCarousel = layout === 'carousel' && roms.length > 0;
+
+  on(viewport, 'click', (e: MouseEvent) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-rom-id]');
+    if (!el || isCarousel) return;
+    activate(el);
+  });
+
+  on(viewport, 'contextmenu', (e: MouseEvent) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-rom-id]');
+    const rom = romById(el?.dataset.romId);
+    if (!rom) return;
+    e.preventDefault();
+    openContextMenu(e.clientX, e.clientY, romMenu(rom));
+  });
+
+  on(viewport, 'keydown', (e: KeyboardEvent) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-rom-id]');
+    if (!el) return;
+    const rom = romById(el.dataset.romId);
+    if (!rom) return;
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      e.preventDefault();
+      openContextMenuAt(el, romMenu(rom));
+    } else if (e.key === 'F2') {
+      e.preventDefault();
+      renameRom(rom);
+    } else if (e.key === 'Delete') {
+      e.preventDefault();
+      hideRom(rom);
+    }
+  });
+
+  viewport.querySelector('#btnAddRomFile')?.addEventListener('click', () => {
+    sfx.play('click');
+    addRomFiles();
+  });
+  viewport.querySelector('#btnAddRomDir')?.addEventListener('click', () => {
+    sfx.play('click');
+    addRomFolder();
+  });
+  viewport.querySelector('#btnBackToConsoles')?.addEventListener('click', () => {
     sfx.play('click');
     carouselIndex = 0;
     store.set({ consoleFilter: 'ALL' });
   });
-
-  // Tile and List clicks for ROMs
-  container.querySelectorAll<HTMLElement>('.rom-cell, .list-row:not(.folder-tile)').forEach((tile) => {
-    tile.addEventListener('click', (e) => {
-      const romId = (e.currentTarget as HTMLElement).dataset.romId;
-      const rom = state.roms.find((r: RomItem) => r.id === romId);
-      if (rom) {
-        sfx.play('click');
-        openFactSheet(rom);
-      }
-    });
+  viewport.querySelector('#btnClearSearch')?.addEventListener('click', () => {
+    store.set({ searchQuery: '' });
+    container.querySelector<HTMLInputElement>('#librarySearch')?.focus();
   });
 
-  // Carousel Layout Interactions
-  if (state.settings.libraryLayout === 'carousel' && totalItems > 0) {
-    const track = container.querySelector<HTMLElement>('#carouselTrack');
-    const cards = container.querySelectorAll<HTMLElement>('.carousel-card');
-    const carouselContainer = container.querySelector<HTMLElement>('.carousel-container');
-
-    const updateCarouselView = () => {
-      if (!track || !carouselContainer) return;
-      cards.forEach((card, idx) => {
-        const isFolder = card.classList.contains('folder-tile');
-        if (idx === carouselIndex) {
-          card.className = isFolder
-            ? 'carousel-card folder-tile active'
-            : 'carousel-card active';
-        } else {
-          card.className = isFolder
-            ? 'carousel-card folder-tile neighbor'
-            : 'carousel-card neighbor';
-        }
-      });
-
-      if (cards.length === 1) {
-        track.style.margin = '0 auto';
-        track.style.transform = 'none';
-      } else {
-        track.style.margin = '';
-        const containerWidth = carouselContainer.clientWidth || window.innerWidth;
-        const cardWidth = 260;
-        const cardGap = 28;
-        const step = cardWidth + cardGap;
-        const centerOffset = containerWidth / 2 - cardWidth / 2 - carouselIndex * step;
-        track.style.transform = `translateX(${centerOffset}px)`;
-      }
-    };
-
-    updateCarouselView();
-    window.addEventListener('resize', updateCarouselView);
-    cleanups.push(() => {
-      window.removeEventListener('resize', updateCarouselView);
-    });
-
-    if (window.ResizeObserver && carouselContainer) {
-      const ro = new ResizeObserver(() => {
-        updateCarouselView();
-      });
-      ro.observe(carouselContainer);
-      cleanups.push(() => {
-        ro.disconnect();
-      });
-    }
-
-    let isDragging = false;
-    let startX = 0;
-    let moved = false;
-
-    if (carouselContainer) {
-      // 1. Slide / Swipe Gesture
-      const onPointerDown = (e: PointerEvent) => {
-        if (e.button !== 0 && e.pointerType === 'mouse') return;
-        isDragging = true;
-        moved = false;
-        startX = e.clientX;
-      };
-
-      const onPointerMove = (e: PointerEvent) => {
-        if (!isDragging) return;
-        if (Math.abs(e.clientX - startX) > 10) {
-          moved = true;
-        }
-      };
-
-      const onPointerUp = (e: PointerEvent) => {
-        if (!isDragging) return;
-        isDragging = false;
-        const deltaX = e.clientX - startX;
-        if (moved && Math.abs(deltaX) > 36) {
-          if (deltaX < -36 && carouselIndex < cards.length - 1) {
-            sfx.play('hover');
-            carouselIndex++;
-            updateCarouselView();
-          } else if (deltaX > 36 && carouselIndex > 0) {
-            sfx.play('hover');
-            carouselIndex--;
-            updateCarouselView();
-          }
-        }
-      };
-
-      carouselContainer.addEventListener('pointerdown', onPointerDown);
-      window.addEventListener('pointermove', onPointerMove);
-      window.addEventListener('pointerup', onPointerUp);
-
-      // 2. Mouse Wheel / Middle Scroll
-      let lastWheelTime = 0;
-      const onWheel = (e: WheelEvent) => {
-        e.preventDefault();
-        const now = Date.now();
-        if (now - lastWheelTime < 180) return;
-
-        const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-        if (Math.abs(delta) < 8) return;
-
-        if (delta > 0 && carouselIndex < cards.length - 1) {
-          lastWheelTime = now;
-          sfx.play('hover');
-          carouselIndex++;
-          updateCarouselView();
-        } else if (delta < 0 && carouselIndex > 0) {
-          lastWheelTime = now;
-          sfx.play('hover');
-          carouselIndex--;
-          updateCarouselView();
-        }
-      };
-
-      carouselContainer.addEventListener('wheel', onWheel, { passive: false });
-
-      cleanups.push(() => {
-        carouselContainer.removeEventListener('pointerdown', onPointerDown);
-        window.removeEventListener('pointermove', onPointerMove);
-        window.removeEventListener('pointerup', onPointerUp);
-        carouselContainer.removeEventListener('wheel', onWheel);
-      });
-    }
-
-    // 3. Card clicks (prevented if dragged)
-    cards.forEach((card) => {
-      card.addEventListener('click', (e) => {
-        if (moved) {
-          moved = false;
-          return;
-        }
-        const clickedIdx = parseInt((e.currentTarget as HTMLElement).dataset.index || '0', 10);
-        if (clickedIdx === carouselIndex) {
-          const targetConsole = (e.currentTarget as HTMLElement).dataset.console;
-          if (targetConsole) {
-            sfx.play('click');
-            store.set({ consoleFilter: targetConsole });
-            return;
-          }
-          const romId = (e.currentTarget as HTMLElement).dataset.romId;
-          const rom = state.roms.find((r: RomItem) => r.id === romId);
-          if (rom) {
-            sfx.play('click');
-            openFactSheet(rom);
-          }
-        } else {
-          sfx.play('hover');
-          carouselIndex = clickedIdx;
-          updateCarouselView();
-        }
-      });
-    });
-
-    // 4. Keyboard Arrow Keys
-    const onCarouselKey = (e: KeyboardEvent) => {
-      if (store.get().currentScreen !== 'library') return;
-      if (state.settings.libraryLayout !== 'carousel') return;
-      if (document.activeElement?.tagName === 'INPUT') return;
-
-      if (e.key === 'ArrowLeft' && carouselIndex > 0) {
-        e.preventDefault();
-        sfx.play('hover');
-        carouselIndex--;
-        updateCarouselView();
-      } else if (e.key === 'ArrowRight' && carouselIndex < cards.length - 1) {
-        e.preventDefault();
-        sfx.play('hover');
-        carouselIndex++;
-        updateCarouselView();
-      } else if (e.key === 'Enter') {
-        const activeCard = cards[carouselIndex];
-        const targetConsole = activeCard?.dataset.console;
-        if (targetConsole) {
-          sfx.play('click');
-          store.set({ consoleFilter: targetConsole });
-          return;
-        }
-        const activeRom = filtered[carouselIndex];
-        if (activeRom) {
-          sfx.play('click');
-          openFactSheet(activeRom);
-        }
-      }
-    };
-    window.addEventListener('keydown', onCarouselKey);
-    cleanups.push(() => {
-      window.removeEventListener('keydown', onCarouselKey);
-    });
+  if (isCarousel) {
+    cleanups.push(setupCarousel(viewport, roms.length, activate, on, (card) => showHero(card.dataset.romId || null)));
+  } else if (roms.length) {
+    cleanups.push(setupCursor(viewport, (id) => showHero(id), on));
   }
 
-  // Global Escape / Backspace key handler to exit console folder back to all consoles
-  const onFolderNavKey = (e: KeyboardEvent) => {
-    if (store.get().currentScreen !== 'library') return;
-    if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
-    if (e.key === 'Escape' || e.key === 'Backspace') {
-      const current = store.get().consoleFilter;
-      if (current !== 'ALL') {
-        e.preventDefault();
-        sfx.play('click');
-        carouselIndex = 0;
-        store.set({ consoleFilter: 'ALL' });
-      }
-    }
-  };
-  window.addEventListener('keydown', onFolderNavKey);
-  cleanups.push(() => {
-    window.removeEventListener('keydown', onFolderNavKey);
-  });
-
-  // Empty state buttons
-  container.querySelector('#btnAddRomDir')?.addEventListener('click', async () => {
-    sfx.play('click');
-    const selected = await emuApi.dialog.selectDirectory();
-    if (selected) {
-      await emuApi.library.addDirectory(selected);
-      const scanned = await emuApi.library.scan();
-      const updatedDirs = [...(store.get().settings.romDirectories || []), selected];
-      store.set({ roms: scanned, settings: { ...store.get().settings, romDirectories: updatedDirs } });
-    }
-  });
-
-  container.querySelector('#btnAddRomFile')?.addEventListener('click', async () => {
-    sfx.play('click');
-    const selected = await emuApi.dialog.selectRomFiles();
-    if (selected && selected.length > 0) {
-      const dirs = store.get().settings.romDirectories || [];
-      const targetDir = dirs[0] || (await emuApi.library.getSpecialRomDirectory())?.path;
-      await emuApi.library.importRomFiles(selected, targetDir);
-      const scanned = await emuApi.library.scan();
-      store.set({ roms: scanned });
-    }
-  });
-
-  // Responsive resize handler that adjusts Grid empty slots when window aspect ratio/resolution changes
-  let resizeRaf: number | null = null;
-  const onScreenResize = () => {
-    if (store.get().currentScreen !== 'library') return;
-    if (resizeRaf) cancelAnimationFrame(resizeRaf);
-    resizeRaf = requestAnimationFrame(() => {
-      const curState = store.get();
-      if (curState.settings.libraryLayout === 'grid') {
-        const gridEl = container.querySelector<HTMLElement>('.roms-grid');
-        const oldCols = parseInt(gridEl?.dataset.cols || '0', 10);
-        const newCols = getGridColumnCount();
-        if (oldCols !== newCols) {
-          renderLibraryScreen(container);
-        }
-      }
-    });
-  };
-  window.addEventListener('resize', onScreenResize);
-  cleanups.push(() => {
-    window.removeEventListener('resize', onScreenResize);
-    if (resizeRaf) cancelAnimationFrame(resizeRaf);
-  });
-
-  const cleanupAll = () => {
-    cleanups.forEach((fn) => fn());
-  };
+  const cleanupAll = () => cleanups.forEach((fn) => fn());
   (container as any)._libraryCleanup = cleanupAll;
   return cleanupAll;
 }
 
-function renderEmptyState(): string {
-  return `
-    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 340px; gap: 18px; text-align: center;">
-      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity: 0.35;"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg>
-      <div>
-        <h2 style="font-size: 20px; font-weight: 800; margin-bottom: 6px;">No ROMs Found</h2>
-        <p style="font-size: 14px; color: var(--ink-secondary); max-width: 440px; line-height: 1.5;">
-          Add individual game files (.gba, .3ds, .iso, .rvz, .nds, .nsp) or select a games folder to populate your library.
-        </p>
-      </div>
-      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center;">
-        <button class="btn-primary plate-button" id="btnAddRomFile" style="padding: 0 24px; width: auto; height: 42px;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-          Add ROM File
-        </button>
-        <button class="btn-secondary plate-button" id="btnAddRomDir" style="padding: 0 24px; width: auto; height: 42px;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          Add ROM Folder
-        </button>
-      </div>
-    </div>
-  `;
-}
+function setupCarousel(
+  viewport: HTMLElement,
+  count: number,
+  activate: (el: HTMLElement) => void,
+  on: Listen,
+  onActive: (card: HTMLElement) => void
+): () => void {
+  const track = viewport.querySelector<HTMLElement>('#carouselTrack');
+  const box = viewport.querySelector<HTMLElement>('.carousel-container');
+  const cards = Array.from(viewport.querySelectorAll<HTMLElement>('.carousel-card'));
+  if (!track || !box || cards.length === 0) return () => {};
 
-function renderViewport(state: any, filtered: RomItem[], isLight: boolean): string {
-  if (state.roms.length === 0) {
-    return renderEmptyState();
-  }
-
-  const shouldShowFolders =
-    state.consoleFilter === 'ALL' &&
-    !state.searchQuery.trim();
-
-  if (shouldShowFolders) {
-    const supportedWebps = ['ps2', 'ds', 'three_ds', 'wii', 'psp', 'switch', 'gamecube'];
-    const consoleGroups: { console: string; roms: RomItem[] }[] = [];
-    const groupMap: Record<string, RomItem[]> = {};
-    for (const r of state.roms) {
-      if (state.settings.hiddenRoms?.includes(r.id)) continue;
-      const nameLow = (r.fileName || r.displayName || '').toLowerCase();
-      if (nameLow.startsWith('photo') || nameLow.includes('photos-') || nameLow.includes('screenshot')) continue;
-      const c = (r.console as string) === 'GBA' ? 'DS' : r.console;
-      if (!groupMap[c]) {
-        groupMap[c] = [];
-        consoleGroups.push({ console: c, roms: groupMap[c] });
-      }
-      groupMap[c].push(r);
-    }
-
-    const validGroups = consoleGroups.filter(
-      (g) => supportedWebps.includes(getConsoleSlug(g.console)) && !state.settings.hiddenConsoles?.includes(g.console)
-    );
-
-    if (validGroups.length === 0) {
-      return renderEmptyState();
-    }
-
-    const consoleOrder = ['3DS', 'PSP', 'DS', 'Switch', 'GameCube', 'Wii', 'PS2'];
-    validGroups.sort((a, b) => {
-      const idxA = consoleOrder.indexOf(a.console);
-      const idxB = consoleOrder.indexOf(b.console);
-      return (idxA >= 0 ? idxA : 99) - (idxB >= 0 ? idxB : 99);
+  const update = (focus = false) => {
+    cards.forEach((card, idx) => {
+      const active = idx === carouselIndex;
+      card.classList.toggle('active', active);
+      card.classList.toggle('neighbor', !active);
+      card.tabIndex = active ? 0 : -1;
     });
+    const card = cards[0];
+    const step = card.offsetWidth + parseFloat(getComputedStyle(track).columnGap || '28');
+    const offset = box.clientWidth / 2 - card.offsetWidth / 2 - carouselIndex * step;
+    track.style.transform = `translateX(${offset}px)`;
+    if (focus) cards[carouselIndex].focus({ preventScroll: true });
+    onActive(cards[carouselIndex]);
+  };
 
-    if (state.settings.libraryLayout === 'carousel') {
-      return renderFolderCarousel(validGroups, isLight);
+  const move = (delta: number) => {
+    const next = Math.max(0, Math.min(count - 1, carouselIndex + delta));
+    if (next === carouselIndex) return;
+    carouselIndex = next;
+    sfx.play('hover');
+    update(box.contains(document.activeElement));
+  };
+
+  update();
+  const ro = new ResizeObserver(() => update());
+  ro.observe(box);
+
+  let dragStart: number | null = null;
+  let dragged = false;
+  on(box, 'pointerdown', (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    dragStart = e.clientX;
+    dragged = false;
+  });
+  on(window, 'pointermove', (e: PointerEvent) => {
+    if (dragStart !== null && Math.abs(e.clientX - dragStart) > 10) dragged = true;
+  });
+  on(window, 'pointerup', (e: PointerEvent) => {
+    if (dragStart === null) return;
+    const delta = e.clientX - dragStart;
+    dragStart = null;
+    if (dragged && Math.abs(delta) > 40) move(delta < 0 ? 1 : -1);
+  });
+
+  let lastWheel = 0;
+  on(
+    box,
+    'wheel',
+    (e: WheelEvent) => {
+      e.preventDefault();
+      const now = Date.now();
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (now - lastWheel < 160 || Math.abs(delta) < 8) return;
+      lastWheel = now;
+      move(delta > 0 ? 1 : -1);
+    },
+    { passive: false }
+  );
+
+  cards.forEach((card) => {
+    card.addEventListener('click', () => {
+      if (dragged) {
+        dragged = false;
+        return;
+      }
+      const idx = Number(card.dataset.index || 0);
+      if (idx === carouselIndex) activate(card);
+      else {
+        carouselIndex = idx;
+        sfx.play('hover');
+        update();
+      }
+    });
+  });
+
+  on(box, 'keydown', (e: KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      move(-1);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      move(1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      move(-count);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      move(count);
     }
-    if (state.settings.libraryLayout === 'list') {
-      return renderFolderList(validGroups, isLight);
-    }
-    return renderFolderGrid(validGroups, isLight);
-  }
+  });
 
-  if (filtered.length === 0) {
-    return `
-      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 260px; gap: 12px; text-align: center;">
-        <h3 style="font-size: 16px; font-weight: 800; color: var(--ink-secondary);">No games found in ${state.consoleFilter === 'ALL' ? 'this search' : state.consoleFilter}</h3>
-        ${
-          state.consoleFilter !== 'ALL'
-            ? `<button class="plate-button btn-secondary" id="btnBackToConsoles" style="height: 32px; padding: 0 14px; font-size: 12px; border-radius: var(--radius-pill); cursor: pointer;">
-                 &larr; Back to Library
-               </button>`
-            : ''
-        }
-      </div>
-    `;
-  }
-
-  return renderContent(filtered, state.settings.libraryLayout, isLight);
-}
-
-function renderFolderGrid(groups: { console: string; roms: RomItem[] }[], isLight: boolean): string {
-  const cols = getGridColumnCount();
-  const minRows = 2;
-  const targetSlots = Math.max(minRows * cols, Math.ceil(groups.length / cols) * cols);
-  const emptyCount = Math.max(0, targetSlots - groups.length);
-  const emptySlotsHtml = Array.from({ length: emptyCount })
-    .map(() => '<div class="empty-slot" aria-hidden="true"></div>')
-    .join('');
-
-  return `
-    <div class="roms-grid" data-cols="${cols}">
-      ${groups
-        .map((g) => {
-          const [c1, c2] = paletteFor(g.console);
-          const slug = getConsoleSlug(g.console);
-          const theme = isLight ? 'light' : 'dark';
-          const supportedWebps = ['ps2', 'ds', 'three_ds', 'wii', 'psp', 'switch', 'gamecube'];
-          const hasArtwork = supportedWebps.includes(slug);
-          const count = g.roms.length;
-          const countLabel = `${count} ${count === 1 ? 'game' : 'games'}`;
-
-          return `
-            <div class="folder-tile" data-console="${g.console}" tabindex="0" title="${getConsoleFriendlyName(g.console)}">
-              <div class="folder-artwork-wrap" style="background: linear-gradient(135deg, ${c1}, ${c2});">
-                ${
-                  hasArtwork
-                    ? `<img src="assets/consoles/console_${slug}_${theme}.webp" class="folder-art-img" alt="${g.console}" onerror="this.style.display='none'; const lbl = this.nextElementSibling; if (lbl) lbl.style.display='block';">
-                       <div class="folder-console-label" style="display: none;">${g.console}</div>`
-                    : `<div class="folder-console-label">${g.console}</div>`
-                }
-                <div class="folder-count-pill">${countLabel}</div>
-              </div>
-            </div>
-          `;
-        })
-        .join('')}
-      ${emptySlotsHtml}
-    </div>
-  `;
-}
-
-function renderFolderCarousel(groups: { console: string; roms: RomItem[] }[], isLight: boolean): string {
-  return `
-    <div class="carousel-container">
-      <div class="roms-carousel-track" id="carouselTrack">
-        ${groups
-          .map((g, idx) => {
-            const [c1, c2] = paletteFor(g.console);
-            const slug = getConsoleSlug(g.console);
-            const theme = isLight ? 'light' : 'dark';
-            const supportedWebps = ['ps2', 'ds', 'three_ds', 'wii', 'psp', 'switch', 'gamecube'];
-            const hasArtwork = supportedWebps.includes(slug);
-            const count = g.roms.length;
-            const countLabel = `${count} ${count === 1 ? 'game' : 'games'}`;
-
-            return `
-              <div class="carousel-card folder-tile ${idx === carouselIndex ? 'active' : 'neighbor'}" data-console="${g.console}" data-index="${idx}" tabindex="0" title="${getConsoleFriendlyName(g.console)}">
-                <div class="carousel-artwork-wrap folder-artwork-wrap" style="background: linear-gradient(135deg, ${c1}, ${c2});">
-                  ${
-                    hasArtwork
-                      ? `<img src="assets/consoles/console_${slug}_${theme}.webp" class="folder-art-img" alt="${g.console}" onerror="this.style.display='none'; const lbl = this.nextElementSibling; if (lbl) lbl.style.display='block';">
-                         <div class="folder-console-label" style="display: none;">${g.console}</div>`
-                      : `<div class="folder-console-label">${g.console}</div>`
-                  }
-                  <div class="folder-count-pill">${countLabel}</div>
-                </div>
-              </div>
-            `;
-          })
-          .join('')}
-      </div>
-    </div>
-  `;
-}
-
-function renderFolderList(groups: { console: string; roms: RomItem[] }[], isLight: boolean): string {
-  return `
-    <div class="roms-list">
-      ${groups
-        .map((g) => {
-          const [c1, c2] = paletteFor(g.console);
-          const slug = getConsoleSlug(g.console);
-          const theme = isLight ? 'light' : 'dark';
-          const supportedWebps = ['ps2', 'ds', 'three_ds', 'wii', 'psp', 'switch', 'gamecube'];
-          const hasArtwork = supportedWebps.includes(slug);
-          const count = g.roms.length;
-          const countLabel = `${count} ${count === 1 ? 'game' : 'games'}`;
-          return `
-            <div class="list-row folder-tile" data-console="${g.console}" tabindex="0">
-              <div style="display: flex; align-items: center; gap: 16px;">
-                <div class="list-row-art" style="width: 54px; height: 54px; border-radius: 16px; overflow: hidden; position: relative; flex-shrink: 0; background: linear-gradient(135deg, ${c1}, ${c2}); border: 2px solid rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: center;">
-                  ${
-                    hasArtwork
-                      ? `<img src="assets/consoles/console_${slug}_${theme}.webp" style="width: 100%; height: 100%; object-fit: cover;" alt="${g.console}" onerror="this.style.display='none'; const p = this.nextElementSibling; if (p) p.style.display='block';">
-                         <span style="display: none; font-weight: 800; font-size: 13px; color: #fff;">${g.console}</span>`
-                      : `<span style="font-weight: 800; font-size: 13px; color: #fff;">${g.console}</span>`
-                  }
-                </div>
-                <div>
-                  <div style="font-weight: 700; font-size: 16px; color: var(--ink-primary);">${getConsoleFriendlyName(g.console)}</div>
-                  <div style="font-size: 12px; color: var(--ink-secondary); margin-top: 2px;">${countLabel}</div>
-                </div>
-              </div>
-              <div style="display: flex; align-items: center; gap: 14px; color: var(--ink-secondary);">
-                <span class="rom-tile-badge" style="position: static;">${g.console}</span>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-              </div>
-            </div>
-          `;
-        })
-        .join('')}
-    </div>
-  `;
-}
-
-function renderContent(roms: RomItem[], layout: string, isLight: boolean): string {
-  if (layout === 'carousel') {
-    return `
-      <div class="carousel-container">
-        <div class="roms-carousel-track" id="carouselTrack">
-          ${roms
-            .map(
-              (r, idx) => {
-                const [c1, c2] = paletteFor(r.displayName);
-                const initials = shortLabel(r.displayName);
-                return `
-            <div class="carousel-card ${idx === carouselIndex ? 'active' : 'neighbor'}" data-rom-id="${r.id}" data-index="${idx}" tabindex="0">
-              <div class="carousel-artwork-wrap">
-                ${
-                  r.artworkUrl
-                    ? `<img src="${r.artworkUrl}" data-fallback="${r.fallbackArtworkUrl || ''}" class="rom-artwork" alt="${r.displayName}" loading="lazy" onerror="if (this.dataset.fallback && this.src !== this.dataset.fallback) { this.src = this.dataset.fallback; } else { this.style.display='none'; const p = this.nextElementSibling; if (p) p.style.display='flex'; }">`
-                    : ''
-                }
-                <div class="rom-placeholder-art" style="background: linear-gradient(135deg, ${c1}, ${c2}); ${r.artworkUrl ? 'display: none;' : 'display: flex;'}">
-                  <span class="rom-placeholder-initials" style="font-size: 42px;">${initials}</span>
-                </div>
-                <span class="rom-tile-badge">${r.console}</span>
-                ${renderCompatBadge(r.compatRating)}
-              </div>
-              <div class="carousel-title">${r.displayName}</div>
-            </div>
-          `;
-              }
-            )
-            .join('')}
-        </div>
-      </div>
-    `;
-  }
-
-  if (layout === 'list') {
-    return `
-      <div class="roms-list">
-        ${roms
-          .map(
-            (r) => {
-              const [c1, c2] = paletteFor(r.displayName);
-              const initials = shortLabel(r.displayName);
-              return `
-          <div class="list-row" data-rom-id="${r.id}" tabindex="0">
-            <div style="display: flex; align-items: center; gap: 16px;">
-              <div class="list-row-art" style="width: 54px; height: 54px; border-radius: 16px; overflow: hidden; position: relative; flex-shrink: 0; background: rgba(255, 255, 255, 0.04); border: 2px solid rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: center; padding: 4px; box-sizing: border-box;">
-                ${
-                  r.artworkUrl
-                    ? `<img src="${r.artworkUrl}" data-fallback="${r.fallbackArtworkUrl || ''}" style="width: 100%; height: 100%; object-fit: contain;" alt="${r.displayName}" loading="lazy" onerror="if (this.dataset.fallback && this.src !== this.dataset.fallback) { this.src = this.dataset.fallback; } else { this.style.display='none'; const p = this.nextElementSibling; if (p) p.style.display='flex'; }">`
-                    : ''
-                }
-                <div class="rom-placeholder-art small" style="background: linear-gradient(135deg, ${c1}, ${c2}); ${r.artworkUrl ? 'display: none;' : 'display: flex;'} width: 100%; height: 100%; border-radius: 12px;">
-                  <span class="rom-placeholder-initials small">${initials}</span>
-                </div>
-              </div>
-              <div>
-                <div style="font-weight: 700; font-size: 16px; color: var(--ink-primary);">${r.displayName}</div>
-              </div>
-            </div>
-            <div style="display: flex; align-items: center; gap: 12px;">
-              ${renderCompatBadge(r.compatRating)}
-              <span class="rom-tile-badge" style="position: static;">${r.console}</span>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color: var(--ink-secondary);"><polyline points="9 18 15 12 9 6"/></svg>
-            </div>
-          </div>
-        `;
-            }
-          )
-          .join('')}
-      </div>
-    `;
-  }
-
-  // Default Grid Layout with Empty Sockets
-  const cols = getGridColumnCount();
-  const minRows = 2;
-  const targetSlots = Math.max(minRows * cols, Math.ceil(roms.length / cols) * cols);
-  // Keep games centered when viewing a specific console folder or when few titles exist
-  const currentFilter = store.get().consoleFilter;
-  const isFilteredConsole = currentFilter && currentFilter !== 'ALL';
-  const emptyCount = (isFilteredConsole || roms.length < cols) ? 0 : Math.max(0, targetSlots - roms.length);
-  const emptySlotsHtml = Array.from({ length: emptyCount })
-    .map(() => '<div class="empty-slot" aria-hidden="true"></div>')
-    .join('');
-
-  return `
-    <div class="roms-grid" data-cols="${cols}">
-      ${roms
-        .map(
-          (r) => {
-            const [c1, c2] = paletteFor(r.displayName);
-            const initials = shortLabel(r.displayName);
-            return `
-        <div class="rom-cell" data-rom-id="${r.id}" tabindex="0">
-          <div class="rom-tile">
-            <div class="rom-artwork-wrap">
-              ${
-                r.artworkUrl
-                  ? `<img src="${r.artworkUrl}" data-fallback="${r.fallbackArtworkUrl || ''}" class="rom-artwork" alt="${r.displayName}" loading="lazy" onerror="if (this.dataset.fallback && this.src !== this.dataset.fallback) { this.src = this.dataset.fallback; } else { this.style.display='none'; const p = this.nextElementSibling; if (p) p.style.display='flex'; }">`
-                  : ''
-              }
-              <div class="rom-placeholder-art" style="background: linear-gradient(135deg, ${c1}, ${c2}); ${r.artworkUrl ? 'display: none;' : 'display: flex;'}">
-                <span class="rom-placeholder-initials">${initials}</span>
-              </div>
-              <span class="rom-tile-badge">${r.console}</span>
-              ${renderCompatBadge(r.compatRating)}
-            </div>
-          </div>
-          <div class="rom-title" title="${r.displayName}">${r.displayName}</div>
-        </div>
-      `;
-          }
-        )
-        .join('')}
-      ${emptySlotsHtml}
-    </div>
-  `;
+  return () => ro.disconnect();
 }

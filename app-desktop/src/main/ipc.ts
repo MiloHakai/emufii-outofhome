@@ -25,6 +25,19 @@ function isNewerSemver(current: string, latest: string): boolean {
   return false;
 }
 
+const RELEASES_REPO = 'jojodogm-ctrl/emufii';
+const RELEASES_PAGE = `https://github.com/${RELEASES_REPO}/releases`;
+const UPDATE_EXTENSIONS = ['.exe', '.appimage', '.deb', '.dmg'];
+
+const wireguard = new WireGuardManager();
+
+export function teardownTunnel(): Promise<void> {
+  return wireguard.down();
+}
+
+type PendingUpdate = { downloadUrl: string; assetName: string | null; releaseUrl: string };
+let pendingUpdate: PendingUpdate | null = null;
+
 export function setupIpc(
   mainWindow: BrowserWindow,
   storage: Storage,
@@ -38,7 +51,10 @@ export function setupIpc(
   const initialConfig = storage.getConfig();
   CoordinatorClient.identityKey = initialConfig.profile.ownerKey || null;
   const coordinator = new CoordinatorClient(initialConfig.settings.coordinatorUrl);
-  const wireguard = new WireGuardManager();
+
+  const send = (channel: string, payload?: unknown) => {
+    if (!mainWindow.isDestroyed()) send(channel, payload);
+  };
 
   // --- Window controls ---
   safeHandle('window:minimize', (e) => {
@@ -63,7 +79,7 @@ export function setupIpc(
     return win?.isMaximized() ?? false;
   });
   safeHandle('app:openExternal', async (_, url: string) => {
-    if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
       await shell.openExternal(url);
     }
   });
@@ -76,9 +92,26 @@ export function setupIpc(
   });
 
   // --- Storage & Config ---
-  safeHandle('config:get', () => storage.getConfig());
-  safeHandle('config:updateProfile', (_, partial) => storage.updateProfile(partial));
+  // Secrets (WireGuard private key, profile owner key) never leave the main process.
+  const publicProfile = (profile: any) => {
+    const { ownerKey, ...rest } = profile;
+    return rest;
+  };
+  const publicConfig = (cfg: ReturnType<typeof storage.getConfig>) => ({
+    ...cfg,
+    profile: publicProfile(cfg.profile),
+    wgKeys: { publicKey: cfg.wgKeys.publicKey },
+  });
+
+  safeHandle('config:get', () => publicConfig(storage.getConfig()));
+  safeHandle('config:updateProfile', (_, partial) => {
+    const { ownerKey, id, ...safe } = partial || {};
+    return publicProfile(storage.updateProfile(safe));
+  });
   safeHandle('config:updateSettings', (_, partial) => {
+    if (partial?.coordinatorUrl && !/^https?:\/\/[^\s/]+/i.test(partial.coordinatorUrl)) {
+      delete partial.coordinatorUrl;
+    }
     const updated = storage.updateSettings(partial);
     if (partial.coordinatorUrl) {
       coordinator.setBaseUrl(partial.coordinatorUrl);
@@ -96,7 +129,7 @@ export function setupIpc(
   safeHandle('config:resetProfile', () => {
     const resetCfg = storage.resetProfile();
     CoordinatorClient.identityKey = resetCfg.profile.ownerKey || null;
-    return resetCfg;
+    return publicConfig(resetCfg);
   });
   safeHandle('config:setConsoleVisible', (_, consoleName, visible) =>
     storage.setConsoleVisible(consoleName, visible)
@@ -246,7 +279,8 @@ export function setupIpc(
 
   safeHandle('library:openPath', async (_, targetPath?: string) => {
     const p = targetPath || ensureSpecialRomDirectory();
-    if (fs.existsSync(p)) {
+    // shell.openPath would happily execute a file, so only folders are allowed.
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) {
       await shell.openPath(p);
       return true;
     }
@@ -474,11 +508,7 @@ export function setupIpc(
 
   // --- Emulators ---
   EmulatorManager.setOnGameExit(() => {
-    try {
-      if (!mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('emulators:game-closed');
-      }
-    } catch {}
+    send('emulators:game-closed');
   });
 
   safeHandle('emulators:killActiveGame', () => {
@@ -490,12 +520,12 @@ export function setupIpc(
   });
   safeHandle('emulators:download', async (_, consoleType: string) => {
     return EmulatorDownloader.downloadEmulator(consoleType, (percent, status) => {
-      mainWindow.webContents.send('emulators:download-progress', { consoleType, percent, status });
+      send('emulators:download-progress', { consoleType, percent, status });
     });
   });
   safeHandle('emulators:downloadAll', async () => {
     return EmulatorDownloader.downloadAll((consoleType, percent, status) => {
-      mainWindow.webContents.send('emulators:download-progress', { consoleType, percent, status });
+      send('emulators:download-progress', { consoleType, percent, status });
     });
   });
   safeHandle('emulators:isDownloaded', (_, consoleType: string) => {
@@ -528,24 +558,19 @@ export function setupIpc(
   // --- Application Updates ---
   safeHandle('app:checkForUpdates', async () => {
     const currentVersion = app.getVersion() || '2.0.4';
-    const repos = ['Noobiez16/emufii', 'jojodogm-ctrl/emufii'];
     let releaseData: any = null;
+    pendingUpdate = null;
 
-    for (const repo of repos) {
-      try {
-        const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-          headers: { 'User-Agent': 'Emufii-Desktop' },
-          signal: AbortSignal.timeout(6000),
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json && json.tag_name) {
-            releaseData = json;
-            break;
-          }
-        }
-      } catch {}
-    }
+    try {
+      const res = await fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, {
+        headers: { 'User-Agent': 'Emufii-Desktop' },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.tag_name) releaseData = json;
+      }
+    } catch {}
 
     if (!releaseData) {
       return {
@@ -553,8 +578,8 @@ export function setupIpc(
         currentVersion,
         latestVersion: currentVersion,
         updateAvailable: false,
-        releaseUrl: 'https://github.com/Noobiez16/emufii/releases',
-        downloadUrl: 'https://github.com/Noobiez16/emufii/releases',
+        releaseUrl: RELEASES_PAGE,
+        downloadUrl: RELEASES_PAGE,
         assetName: null,
         notes: 'Your Emufii Desktop installation is up to date.',
       };
@@ -577,24 +602,42 @@ export function setupIpc(
       matchedAsset = assets.find((a) => typeof a.name === 'string' && a.name.toLowerCase().endsWith('.dmg'));
     }
 
+    const releaseUrl = releaseData.html_url || RELEASES_PAGE;
+    const downloadUrl = matchedAsset?.browser_download_url || releaseUrl;
+    const assetName = matchedAsset?.name ? path.basename(matchedAsset.name) : null;
+    if (updateAvailable) pendingUpdate = { downloadUrl, assetName, releaseUrl };
+
     return {
       ok: true,
       currentVersion,
       latestVersion,
       updateAvailable,
-      releaseUrl: releaseData.html_url || 'https://github.com/Noobiez16/emufii/releases',
-      downloadUrl: matchedAsset?.browser_download_url || releaseData.html_url || 'https://github.com/Noobiez16/emufii/releases',
-      assetName: matchedAsset?.name || null,
+      releaseUrl,
+      downloadUrl,
+      assetName,
       notes: releaseData.body || 'Includes the latest Emufii Desktop improvements, real-time friend status updates, and emulator configurations.',
     };
   });
 
-  safeHandle('app:performUpdate', async (_, info: { downloadUrl?: string; assetName?: string | null; releaseUrl?: string }) => {
-    const url = info?.downloadUrl || info?.releaseUrl || 'https://github.com/Noobiez16/emufii/releases';
-    const assetName = info?.assetName;
+  // The renderer only triggers the update; what gets downloaded comes from the last GitHub check.
+  safeHandle('app:performUpdate', async () => {
+    const info = pendingUpdate;
+    if (!info) {
+      await shell.openExternal(RELEASES_PAGE);
+      return { success: true, openedBrowser: true };
+    }
+    const url = info.downloadUrl;
+    const assetName = info.assetName;
+    const trustedHost = (() => {
+      try {
+        return new URL(url).hostname === 'github.com';
+      } catch {
+        return false;
+      }
+    })();
 
-    if (!assetName || !url.startsWith('http') || (!assetName.endsWith('.exe') && !assetName.endsWith('.AppImage') && !assetName.endsWith('.deb') && !assetName.endsWith('.dmg'))) {
-      await shell.openExternal(info?.releaseUrl || url);
+    if (!assetName || !trustedHost || !UPDATE_EXTENSIONS.some((ext) => assetName.toLowerCase().endsWith(ext))) {
+      await shell.openExternal(info.releaseUrl);
       return { success: true, openedBrowser: true };
     }
 
@@ -602,7 +645,7 @@ export function setupIpc(
       const downloadsDir = app.getPath('downloads');
       const destPath = path.join(downloadsDir, assetName);
 
-      mainWindow.webContents.send('app:update-progress', { percent: 5, status: `Connecting to download ${assetName}...` });
+      send('app:update-progress', { percent: 5, status: `Connecting to download ${assetName}...` });
 
       const response = await fetch(url, {
         headers: { 'User-Agent': 'Emufii-Desktop' },
@@ -617,18 +660,18 @@ export function setupIpc(
       const fileStream = fs.createWriteStream(destPath);
 
       for await (const chunk of response.body as any) {
-        fileStream.write(chunk);
+        if (!fileStream.write(chunk)) await new Promise<void>((r) => fileStream.once('drain', () => r()));
         receivedBytes += chunk.length;
         const mbDone = (receivedBytes / 1024 / 1024).toFixed(1);
         if (totalBytes > 0) {
           const mbTotal = (totalBytes / 1024 / 1024).toFixed(1);
           const percent = Math.min(96, Math.round((receivedBytes / totalBytes) * 90) + 5);
-          mainWindow.webContents.send('app:update-progress', {
+          send('app:update-progress', {
             percent,
             status: `Downloading update (${mbDone} MB / ${mbTotal} MB)...`,
           });
         } else {
-          mainWindow.webContents.send('app:update-progress', {
+          send('app:update-progress', {
             percent: 55,
             status: `Downloading update (${mbDone} MB)...`,
           });
@@ -645,7 +688,7 @@ export function setupIpc(
         } catch {}
       }
 
-      mainWindow.webContents.send('app:update-progress', {
+      send('app:update-progress', {
         percent: 100,
         status: 'Update downloaded! Opening installer...',
       });
@@ -658,7 +701,7 @@ export function setupIpc(
 
       return { success: true, filePath: destPath };
     } catch (err: any) {
-      await shell.openExternal(info?.releaseUrl || url);
+      await shell.openExternal(info.releaseUrl);
       return { success: true, openedBrowser: true, fallbackReason: err.message };
     }
   });

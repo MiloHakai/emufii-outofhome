@@ -22,6 +22,7 @@ export interface SessionInviteEntry {
 }
 
 export interface AppConfig {
+  version?: number;
   profile: {
     id: string;
     name: string;
@@ -100,6 +101,10 @@ export class Storage {
         loaded = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
       }
     } catch {
+      // Keep the unreadable file: it holds the friend code and keys we are about to regenerate.
+      try {
+        fs.copyFileSync(this.configPath, `${this.configPath}.corrupt-${Date.now()}`);
+      } catch {}
       loaded = {};
     }
 
@@ -169,7 +174,12 @@ export class Storage {
       autoDownloadUpdates: loaded.settings?.autoDownloadUpdates !== false,
     };
 
-    const config: AppConfig = { profile, wgKeys, settings };
+    // Early desktop builds defaulted to the "cyan" accent; the shared default is the Android teal.
+    if ((loaded.version || 1) < 2 && settings.accent === 'cyan') {
+      settings.accent = 'teal';
+    }
+
+    const config: AppConfig = { version: 2, profile, wgKeys, settings };
     this.save(config);
     return config;
   }
@@ -179,7 +189,9 @@ export class Storage {
     try {
       const dir = path.dirname(this.configPath);
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf8');
+      const tmp = `${this.configPath}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.config, null, 2), { encoding: 'utf8', mode: 0o600 });
+      fs.renameSync(tmp, this.configPath);
     } catch (err) {
       console.error('Failed to save config:', err);
     }

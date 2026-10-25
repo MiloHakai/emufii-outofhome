@@ -182,15 +182,15 @@ export class CoordinatorClient {
   }
 
   async patchSession(code: string, hostIp: string, port: number, token?: string): Promise<void> {
-    await this.request(`/sessions/${code}`, 'PATCH', { host_ip: hostIp, port }, 4000, token);
+    await this.request(`/sessions/${encodeURIComponent(code)}`, 'PATCH', { host_ip: hostIp, port }, 4000, token);
   }
 
   async setHostReady(code: string, ready: boolean, token?: string): Promise<void> {
-    await this.request(`/sessions/${code}`, 'PATCH', { host_ready: ready }, 4000, token);
+    await this.request(`/sessions/${encodeURIComponent(code)}`, 'PATCH', { host_ready: ready }, 4000, token);
   }
 
   async getSession(code: string): Promise<RemoteSession> {
-    const res = await this.request(`/sessions/${code}`, 'GET');
+    const res = await this.request(`/sessions/${encodeURIComponent(code)}`, 'GET');
     const json = JSON.parse(res);
     return {
       code: json.code,
@@ -261,7 +261,7 @@ export class CoordinatorClient {
     if (rttMs != null) body.rtt_ms = rttMs;
     if (CoordinatorClient.identityKey) body.key = CoordinatorClient.identityKey;
 
-    const res = await this.request(`/sessions/${code}/members`, 'POST', body);
+    const res = await this.request(`/sessions/${encodeURIComponent(code)}/members`, 'POST', body);
     const json = JSON.parse(res);
     return {
       players: json.players || 0,
@@ -271,11 +271,11 @@ export class CoordinatorClient {
   }
 
   async leaveSession(code: string, id: string, token?: string | null): Promise<void> {
-    await this.request(`/sessions/${code}/members/${id}`, 'DELETE', undefined, 4000, token);
+    await this.request(`/sessions/${encodeURIComponent(code)}/members/${encodeURIComponent(id)}`, 'DELETE', undefined, 4000, token);
   }
 
   async deleteSession(code: string, token?: string | null): Promise<void> {
-    await this.request(`/sessions/${code}`, 'DELETE', undefined, 8000, token);
+    await this.request(`/sessions/${encodeURIComponent(code)}`, 'DELETE', undefined, 8000, token);
   }
 
   async announcePresence(id: string, name: string, inSession = false): Promise<void> {
@@ -342,7 +342,7 @@ export class CoordinatorClient {
       body.id = profileId;
       if (CoordinatorClient.identityKey) body.key = CoordinatorClient.identityKey;
     }
-    const res = await this.request(`/sessions/${code}/peers`, 'POST', body, 15000);
+    const res = await this.request(`/sessions/${encodeURIComponent(code)}/peers`, 'POST', body, 15000);
     const json = JSON.parse(res);
     const relay = json.relay;
     if (!relay) throw new CoordinatorError('The coordinator has no relay configured');
@@ -387,7 +387,7 @@ export class CoordinatorClient {
 
   async fetchMemberAvatar(code: string, handle: string): Promise<string | null> {
     try {
-      const buf = await this.requestBytes(`/sessions/${code}/members/${handle}/avatar`, 'GET', 48 * 1024);
+      const buf = await this.requestBytes(`/sessions/${encodeURIComponent(code)}/members/${encodeURIComponent(handle)}/avatar`, 'GET', 48 * 1024);
       if (!buf || buf.length === 0) return null;
       return `data:image/webp;base64,${buf.toString('base64')}`;
     } catch {

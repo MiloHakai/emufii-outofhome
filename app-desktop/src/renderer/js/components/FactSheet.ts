@@ -1,7 +1,9 @@
 import { store } from '../state.js';
 import { sfx } from '../sfx.js';
-import { paletteFor, shortLabel } from '../screens/LibraryScreen.js';
-import { toggleFloatingPanel } from './FloatingPanel.js';
+import { paletteFor, shortLabel, romTitle, getConsoleFriendlyName } from '../screens/LibraryScreen.js';
+import { openFloatingPanel, getSelectedRegion } from './FloatingPanel.js';
+import { esc } from '../html.js';
+import { toast, errorMessage } from '../toast.js';
 import { ensureEmulator } from './EmulatorDownloadModal.js';
 import { generateSessionCode } from '../../../main/network/sessionCodes.js';
 import type { RomItem } from '../../../main/library/scanner.js';
@@ -14,7 +16,9 @@ export function openFactSheet(rom: RomItem) {
   const rating = compat?.rating || 'perfect';
 
   const [c1, c2] = paletteFor(rom.displayName);
-  const initials = shortLabel(rom.displayName);
+  const title = romTitle(rom);
+  const initials = shortLabel(title);
+  const consoleLabel = esc(getConsoleFriendlyName(rom.console));
 
   let currentMode: 'wireless' | 'online' = 'wireless';
   let isPrivate = false;
@@ -22,8 +26,8 @@ export function openFactSheet(rom: RomItem) {
 
   const dialogContent = dialog.querySelector('.dialog-content') as HTMLElement;
   dialogContent.innerHTML = `
-    <div class="game-launch-modal">
-      <button id="btnCloseLaunchDialog" class="icon-btn plate-button launch-close-btn" title="Close">
+    <div class="game-launch-modal" tabindex="-1">
+      <button id="btnCloseLaunchDialog" class="icon-btn plate-button launch-close-btn" title="Close (Esc)" aria-label="Close">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -35,38 +39,38 @@ export function openFactSheet(rom: RomItem) {
         <div class="launch-artwork">
           ${
             rom.artworkUrl
-              ? `<img src="${rom.artworkUrl}" data-fallback="${(rom as any).fallbackArtworkUrl || ''}" class="launch-art-img" alt="${rom.displayName}" loading="lazy" onerror="if (this.dataset.fallback && this.src !== this.dataset.fallback) { this.src = this.dataset.fallback; } else { this.style.display='none'; const p = this.nextElementSibling; if (p) p.style.display='flex'; }">`
+              ? `<img src="${esc(rom.artworkUrl)}" data-fallback="${esc(rom.fallbackArtworkUrl || '')}" class="launch-art-img" alt="" draggable="false">`
               : ''
           }
-          <div class="launch-art-placeholder" style="background: linear-gradient(135deg, ${c1}, ${c2}); ${rom.artworkUrl ? 'display: none;' : 'display: flex;'} align-items: center; justify-content: center; width: 100%; height: 100%; border-radius: 14px;">
-            <span style="font-size: 44px; font-weight: 900; color: white; letter-spacing: 2px;">${initials}</span>
+          <div class="launch-art-placeholder" data-img-fallback style="background: linear-gradient(135deg, ${c1}, ${c2});" ${rom.artworkUrl ? 'hidden' : ''}>
+            <span>${esc(initials)}</span>
           </div>
         </div>
 
-        <div class="launch-compat-pill">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="#1FA98B" stroke-width="2.2" fill="none"/>
-            <path d="M7.5 12l3 3 6-6" stroke="#1FA98B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <div class="launch-compat-pill ${rating === 'broken' ? 'broken' : rating === 'partial' ? 'partial' : 'perfect'}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            ${rating === 'broken' ? '<line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>' : rating === 'partial' ? '<line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>' : '<path d="M7.5 12l3 3 6-6"/>'}
           </svg>
-          <span>${rating === 'broken' ? 'Incompatible' : rating === 'partial' ? 'Playable' : 'Compatible'}</span>
+          <span>${rating === 'broken' ? 'Incompatible' : rating === 'partial' ? 'Partially working' : 'Compatible'}</span>
         </div>
       </div>
 
       <!-- Right Column: Mode Switch, Privacy Toggle, Launch Buttons -->
       <div class="launch-right-col">
         <div class="launch-title-block">
-          <div class="launch-game-title">${rom.displayName}</div>
-          <div class="launch-game-subtitle" id="launchGameSubtitle">${rom.console} &bull; multiplayer session</div>
+          <div class="launch-game-title">${esc(title)}</div>
+          <div class="launch-game-subtitle" id="launchGameSubtitle">${consoleLabel} &bull; multiplayer session</div>
         </div>
 
         ${
           hasModes
             ? `
         <!-- Mode Switch (Wireless play / Online) -->
-        <div class="launch-mode-switch" id="launchModeSwitch">
+        <div class="launch-mode-switch" id="launchModeSwitch" role="tablist" aria-label="Play mode">
           <div class="launch-mode-glider" id="launchModeGlider"></div>
-          <button class="launch-mode-tab active" id="btnModeWireless" type="button">Wireless play</button>
-          <button class="launch-mode-tab" id="btnModeOnline" type="button">Online</button>
+          <button class="launch-mode-tab active" id="btnModeWireless" type="button" role="tab" aria-selected="true">Wireless play</button>
+          <button class="launch-mode-tab" id="btnModeOnline" type="button" role="tab" aria-selected="false">Online</button>
         </div>
         `
             : ''
@@ -77,12 +81,12 @@ export function openFactSheet(rom: RomItem) {
           <!-- Privacy Toggle (Collapsible with smooth grid height) -->
           <div class="launch-collapsible" id="launchPrivacyCollapsible">
             <div>
-              <div class="launch-privacy-row" id="launchPrivacyRow">
+              <div class="launch-privacy-row" id="launchPrivacyRow" role="switch" aria-checked="false" aria-labelledby="launchPrivacyTitle" tabindex="0">
                 <div>
                   <div class="launch-privacy-title" id="launchPrivacyTitle">Open session</div>
                   <div class="launch-privacy-desc" id="launchPrivacyDesc">Shows in the session list. Anyone can join.</div>
                 </div>
-                <button class="launch-switch" id="launchPrivacySwitch" role="switch" aria-checked="false" title="Toggle Private Session">
+                <button class="launch-switch" id="launchPrivacySwitch" tabindex="-1" aria-hidden="true">
                   <span class="launch-switch-thumb"></span>
                 </button>
               </div>
@@ -91,7 +95,7 @@ export function openFactSheet(rom: RomItem) {
 
           <!-- Actions Stack -->
           <div class="launch-actions-stack">
-            <button class="launch-btn-primary plate-button" id="btnLaunchPrimary">
+            <button class="launch-btn-primary plate-button" id="btnLaunchPrimary" data-autofocus>
               Create a session
             </button>
             <div class="launch-collapsible" id="launchSecondaryCollapsible">
@@ -121,16 +125,18 @@ export function openFactSheet(rom: RomItem) {
   const btnSecondary = dialogContent.querySelector('#btnLaunchSecondary') as HTMLElement;
 
   const updateView = (skipAnim: boolean = false) => {
+    btnWireless?.setAttribute('aria-selected', String(currentMode === 'wireless'));
+    btnOnline?.setAttribute('aria-selected', String(currentMode === 'online'));
     if (currentMode === 'wireless') {
       modeSwitchEl?.classList.remove('mode-online');
       btnWireless?.classList.add('active');
       btnOnline?.classList.remove('active');
       if (skipAnim) {
-        subtitleEl.innerHTML = `${rom.console} &bull; multiplayer session`;
+        subtitleEl.innerHTML = `${consoleLabel} &bull; multiplayer session`;
       } else {
         subtitleEl.style.opacity = '0';
         setTimeout(() => {
-          subtitleEl.innerHTML = `${rom.console} &bull; multiplayer session`;
+          subtitleEl.innerHTML = `${consoleLabel} &bull; multiplayer session`;
           subtitleEl.style.opacity = '1';
         }, 120);
       }
@@ -138,27 +144,26 @@ export function openFactSheet(rom: RomItem) {
       secondaryCollapsible.classList.remove('collapsed');
       btnPrimary.textContent = 'Create a session';
 
+      privacyRow.setAttribute('aria-checked', String(isPrivate));
       if (isPrivate) {
         privacyTitle.textContent = 'Private session';
         privacyDesc.textContent = 'Hidden from the session list. Your code lets people in.';
         privacySwitch.classList.add('checked');
-        privacySwitch.setAttribute('aria-checked', 'true');
       } else {
         privacyTitle.textContent = 'Open session';
         privacyDesc.textContent = 'Shows in the session list. Anyone can join.';
         privacySwitch.classList.remove('checked');
-        privacySwitch.setAttribute('aria-checked', 'false');
       }
     } else {
       modeSwitchEl?.classList.add('mode-online');
       btnWireless?.classList.remove('active');
       btnOnline?.classList.add('active');
       if (skipAnim) {
-        subtitleEl.innerHTML = `${rom.console} &bull; online play`;
+        subtitleEl.innerHTML = `${consoleLabel} &bull; online play`;
       } else {
         subtitleEl.style.opacity = '0';
         setTimeout(() => {
-          subtitleEl.innerHTML = `${rom.console} &bull; online play`;
+          subtitleEl.innerHTML = `${consoleLabel} &bull; online play`;
           subtitleEl.style.opacity = '1';
         }, 120);
       }
@@ -204,7 +209,7 @@ export function openFactSheet(rom: RomItem) {
     sfx.play('click');
     dialog.close();
     store.set({ selectedRom: rom });
-    toggleFloatingPanel('join');
+    openFloatingPanel('join');
   });
 
   dialogContent.querySelector('#btnCloseLaunchDialog')?.addEventListener('click', () => {
@@ -212,7 +217,16 @@ export function openFactSheet(rom: RomItem) {
     dialog.close();
   });
 
-  dialog.onclick = (e) => {
+  dialogContent.querySelector('#launchModeSwitch')?.addEventListener('keydown', (e) => {
+    const key = (e as KeyboardEvent).key;
+    if (key !== 'ArrowLeft' && key !== 'ArrowRight') return;
+    e.preventDefault();
+    const next = key === 'ArrowLeft' ? btnWireless : btnOnline;
+    next?.click();
+    next?.focus();
+  });
+
+  dialog.onmousedown = (e) => {
     if (e.target === dialog) {
       sfx.play('click');
       dialog.close();
@@ -220,6 +234,11 @@ export function openFactSheet(rom: RomItem) {
   };
 
   dialog.showModal();
+  if (document.body.dataset.input === 'mouse') {
+    dialogContent.querySelector<HTMLElement>('.game-launch-modal')?.focus({ preventScroll: true });
+  } else {
+    btnPrimary.focus({ preventScroll: true });
+  }
 }
 
 async function launchOnline(rom: RomItem) {
@@ -271,11 +290,11 @@ async function launchOnline(rom: RomItem) {
     }
 
     if (res && !res.success) {
-      alert(res.message || 'Emulator executable not found. Please configure its path in Settings.');
+      toast(res.message || 'Emulator not found. Set its path in Settings › Emulators.', 'error');
     }
   } catch (err: any) {
     console.error('Failed to launch online:', err);
-    alert('Failed to launch online: ' + (err.message || err));
+    toast(`Could not start online play: ${errorMessage(err, 'unknown error')}`, 'error');
     const active = store.get().activeSession;
     if (active && active.code === 'ONLINE') {
       store.set({
@@ -336,6 +355,7 @@ async function startHostSession(rom: RomItem, isPrivate: boolean = false) {
       hostId: profile.id,
       console: rom.console.toLowerCase(),
       isPrivate,
+      region: getSelectedRegion(),
     });
 
     const active = store.get().activeSession;
@@ -413,11 +433,11 @@ async function startHostSession(rom: RomItem, isPrivate: boolean = false) {
     }
 
     if (res && !res.success) {
-      alert(res.message || 'Emulator executable not found. Please configure its path in Settings, then click Launch.');
+      toast(res.message || 'Emulator not found. Set its path in Settings › Emulators, then click Launch.', 'error');
     }
   } catch (err: any) {
     console.error('Failed to host session:', err);
-    alert('Failed to host session: ' + (err.message || err));
+    toast(`Could not host the session: ${errorMessage(err, 'unknown error')}`, 'error');
     const active = store.get().activeSession;
     if (active && active.code === code) {
       store.set({

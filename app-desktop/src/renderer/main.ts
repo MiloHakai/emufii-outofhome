@@ -1,15 +1,12 @@
 import { store, ScreenType, AppState } from './js/state.js';
 import type { RomItem } from '../main/library/scanner.js';
 import { sfx } from './js/sfx.js';
-import { nav } from './js/gamepad.js';
+import { nav, isEditable } from './js/navigation.js';
 import { renderSplashScreen } from './js/screens/SplashScreen.js';
-import { renderLibraryScreen } from './js/screens/LibraryScreen.js';
-import { renderJoinScreen } from './js/screens/JoinScreen.js';
+import { renderLibraryScreen, setLibraryLayout } from './js/screens/LibraryScreen.js';
 import { renderSessionScreen } from './js/screens/SessionScreen.js';
-import { renderFriendsScreen } from './js/screens/FriendsScreen.js';
-import { renderSessionFinderScreen } from './js/screens/SessionFinderScreen.js';
 import { renderSettingsScreen, resetSettingsView } from './js/screens/SettingsScreen.js';
-import { openSettingsModal, resolveTheme } from './js/components/SettingsModal.js';
+import { resolveTheme } from './js/theme.js';
 import {
   toggleFloatingPanel,
   closeFloatingPanel,
@@ -17,11 +14,13 @@ import {
   getFloatingPanelTab,
   renderFloatingPanel,
   refreshRelayLatencies,
-  updateHeaderVpsLabel,
+  getPresence,
 } from './js/components/FloatingPanel.js';
 import { TrayBackdrop } from './js/components/TrayBackdrop.js';
 import { syncFriendsRealtime, encodeAvatarToWebpBase64 } from './js/components/FriendActionModal.js';
 import { openUpdateModal } from './js/components/UpdateModal.js';
+import { closeContextMenu } from './js/contextMenu.js';
+import { toast } from './js/toast.js';
 
 const emuApi = (window as any).emufii;
 
@@ -29,164 +28,240 @@ let cleanupCurrentScreen: (() => void) | null = null;
 let currentRenderedScreen: ScreenType | null = null;
 let trayBackdrop: TrayBackdrop | null = null;
 
-async function bootstrap() {
-  // 1. Initialize sound engine
-  await sfx.init();
+function goBack() {
+  if (closeContextMenu()) return;
+  if (document.querySelector('.modal-backdrop')) return;
+  if (isFloatingPanelOpen()) {
+    closeFloatingPanel();
+    return;
+  }
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[open]');
+  if (dialog) {
+    sfx.play('click');
+    dialog.close();
+    return;
+  }
 
-  // 2. Initialize navigation
-  nav.init({
-    onBack: () => {
+  const state = store.get();
+  if (state.currentScreen === 'session' || state.currentScreen === 'splash') return;
+  if (state.currentScreen === 'library') {
+    if (state.searchQuery) {
+      store.set({ searchQuery: '' });
+    } else if (state.consoleFilter !== 'ALL') {
       sfx.play('click');
-      if (isFloatingPanelOpen()) {
-        closeFloatingPanel();
-        return;
-      }
-      const detailBackBtn = document.getElementById('btnDetailBack');
-      if (detailBackBtn) {
-        detailBackBtn.click();
-        return;
-      }
-      const dialog = document.querySelector('dialog[open]') as HTMLDialogElement;
-      if (dialog) {
-        dialog.close();
-      } else if (store.get().currentScreen === 'library' && store.get().consoleFilter !== 'ALL') {
-        store.set({ consoleFilter: 'ALL' });
-      } else {
-        store.goBack();
+      store.set({ consoleFilter: 'ALL' });
+    }
+    return;
+  }
+  sfx.play('click');
+  if (!store.goBack()) store.navigate('library');
+}
+
+function toggleSettings() {
+  closeFloatingPanel();
+  if (store.get().currentScreen === 'settings') {
+    store.goBack();
+  } else if (store.get().currentScreen !== 'splash') {
+    store.navigate('settings');
+  }
+}
+
+function focusLibrarySearch() {
+  const focus = () => {
+    const input = document.getElementById('librarySearch') as HTMLInputElement | null;
+    input?.focus();
+    input?.select();
+  };
+  closeFloatingPanel();
+  if (store.get().currentScreen === 'library') {
+    focus();
+  } else if (store.get().currentScreen === 'settings') {
+    store.goBack();
+    setTimeout(focus, 260);
+  }
+}
+
+function handleShortcuts(e: KeyboardEvent) {
+  if (e.defaultPrevented || document.querySelector('.modal-backdrop, dialog[open]')) return;
+  const mod = e.ctrlKey || e.metaKey;
+  const screen = store.get().currentScreen;
+  if (screen === 'splash') return;
+
+  if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    toggleFloatingPanel('friends');
+  } else if (mod && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    focusLibrarySearch();
+  } else if (e.key === '/' && !isEditable(e.target as Element)) {
+    e.preventDefault();
+    focusLibrarySearch();
+  } else if (mod && e.key === ',') {
+    e.preventDefault();
+    toggleSettings();
+  } else if (mod && e.key.toLowerCase() === 'j') {
+    e.preventDefault();
+    toggleFloatingPanel('join');
+  } else if (mod && e.key.toLowerCase() === 'o') {
+    e.preventDefault();
+    toggleFloatingPanel('sessions');
+  } else if (mod && ['1', '2', '3'].includes(e.key) && screen === 'library') {
+    e.preventDefault();
+    setLibraryLayout((['grid', 'carousel', 'list'] as const)[Number(e.key) - 1]);
+  } else if (e.key === 'F5') {
+    e.preventDefault();
+    rescanLibrary(true);
+  }
+}
+
+async function rescanLibrary(announce = false) {
+  try {
+    const scanned = await emuApi.library.scan();
+    store.set({ roms: scanned });
+    if (announce) toast(`Library refreshed · ${scanned.length} ${scanned.length === 1 ? 'game' : 'games'}`, 'success', 2500);
+  } catch (err) {
+    console.error('Scan failed:', err);
+    if (announce) toast('Could not scan your ROM folders.', 'error');
+  }
+}
+
+function setupDragAndDrop() {
+  let dragDepth = 0;
+  const overlay = document.getElementById('dropOverlay');
+
+  const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types || []).includes('Files');
+
+  window.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth++;
+    overlay?.classList.add('visible');
+  });
+  window.addEventListener('dragleave', (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) overlay?.classList.remove('visible');
+  });
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = hasFiles(e) ? 'copy' : 'none';
+  });
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    overlay?.classList.remove('visible');
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (files.length === 0) return;
+
+    let added = 0;
+    for (const file of files) {
+      const filePath: string = emuApi.getPathForFile?.(file) || '';
+      if (!filePath) continue;
+      try {
+        const item = await emuApi.library.addFile(filePath);
+        if (item) {
+          added++;
+          continue;
+        }
+        await emuApi.library.removeFile(filePath);
+        await emuApi.library.addDirectory(filePath);
+        added++;
+      } catch {}
+    }
+
+    if (added > 0) {
+      sfx.play('confirm');
+      const config = await emuApi.config.get();
+      store.set({ settings: { ...store.get().settings, ...config.settings } });
+      await rescanLibrary();
+      toast(`Added ${added} ${added === 1 ? 'item' : 'items'} to your library`, 'success', 2500);
+    } else {
+      toast('Nothing to add: drop ROM files or game folders.', 'info');
+    }
+  });
+}
+
+function setupImageFallbacks() {
+  // Embedded DS/3DS icons are tiny pixel art: scale them crisply instead of blurring them.
+  document.addEventListener(
+    'load',
+    (e) => {
+      const img = e.target;
+      if (img instanceof HTMLImageElement && img.naturalWidth > 0 && img.naturalWidth <= 64) {
+        img.classList.add('pixel-art');
       }
     },
-  });
+    true
+  );
+  document.addEventListener(
+    'error',
+    (e) => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement)) return;
+      const fallback = img.dataset.fallback;
+      if (fallback && !img.dataset.triedFallback) {
+        img.dataset.triedFallback = '1';
+        img.src = fallback;
+        return;
+      }
+      img.hidden = true;
+      const placeholder = img.nextElementSibling as HTMLElement | null;
+      if (placeholder?.hasAttribute('data-img-fallback')) placeholder.hidden = false;
+    },
+    true
+  );
+}
 
-  // 3. Window Controls
-  document.getElementById('btnWinMinimize')?.addEventListener('click', () => {
-    emuApi.window.minimize();
-  });
-  document.getElementById('btnWinMaximize')?.addEventListener('click', () => {
-    emuApi.window.maximize();
-  });
-  document.getElementById('btnWinClose')?.addEventListener('click', () => {
-    emuApi.window.close();
+async function bootstrap() {
+  await sfx.init();
+
+  nav.init({ onBack: goBack });
+  window.addEventListener('keydown', handleShortcuts);
+  setupImageFallbacks();
+  setupDragAndDrop();
+
+  document.getElementById('btnWinMinimize')?.addEventListener('click', () => emuApi.window.minimize());
+  document.getElementById('btnWinMaximize')?.addEventListener('click', () => emuApi.window.maximize());
+  document.getElementById('btnWinClose')?.addEventListener('click', () => emuApi.window.close());
+  document.getElementById('appTitlebar')?.addEventListener('dblclick', (e) => {
+    if (!(e.target as HTMLElement).closest('button')) emuApi.window.maximize();
   });
 
   const updateMaximizeUI = (isMax: boolean) => {
     document.body.classList.toggle('is-maximized', isMax);
     const maxBtn = document.getElementById('btnWinMaximize');
     if (maxBtn) {
-      maxBtn.title = isMax ? 'Restore Down' : 'Maximize';
+      maxBtn.title = isMax ? 'Restore' : 'Maximize';
       maxBtn.innerHTML = isMax
         ? `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1"><rect x="2.5" y="0.5" width="7" height="7"/><rect x="0.5" y="2.5" width="7" height="7"/></svg>`
         : `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="9" height="9"/></svg>`;
     }
     trayBackdrop?.updateDimensions();
-    window.dispatchEvent(new Event('resize'));
   };
 
-  emuApi.window.onStateChanged?.(({ maximized }: { maximized: boolean }) => {
-    updateMaximizeUI(maximized);
-  });
+  emuApi.window.onStateChanged?.(({ maximized }: { maximized: boolean }) => updateMaximizeUI(maximized));
+  window.addEventListener('resize', () => trayBackdrop?.updateDimensions());
+  emuApi.window
+    .isMaximized?.()
+    .then((isMax: boolean) => isMax && updateMaximizeUI(true))
+    .catch(() => {});
 
-  window.addEventListener('resize', () => {
-    trayBackdrop?.updateDimensions();
-  });
-
-  emuApi.window.isMaximized?.().then((isMax: boolean) => {
-    if (isMax) updateMaximizeUI(true);
-  }).catch(() => { });
-
-  // 4. Header Navigation Buttons -> Floating Cloud Panel
-  document.getElementById('headerFinderBtn')?.addEventListener('click', () => {
-    sfx.play('click');
-    toggleFloatingPanel('sessions');
-  });
-
-  document.getElementById('headerJoinBtn')?.addEventListener('click', () => {
-    sfx.play('click');
-    toggleFloatingPanel('join');
-  });
-
-  document.getElementById('headerFriendsBtn')?.addEventListener('click', () => {
-    sfx.play('click');
-    toggleFloatingPanel('friends');
-  });
-
-  document.getElementById('headerFolderBackBtn')?.addEventListener('click', () => {
-    sfx.play('click');
-    store.set({ consoleFilter: 'ALL' });
-  });
-
-  document.getElementById('headerProfileBtn')?.addEventListener('click', () => {
-    sfx.play('click');
-    toggleFloatingPanel('profile');
-  });
-
-  document.getElementById('headerStatusDot')?.addEventListener('click', () => {
-    sfx.play('click');
-    toggleFloatingPanel('profile');
-  });
-
-  document.getElementById('vpsStatusChip')?.addEventListener('click', () => {
-    sfx.play('click');
-    toggleFloatingPanel('server');
-  });
-
-  document.getElementById('headerSettingsBtn')?.addEventListener('click', () => {
-    sfx.play('click');
-    closeFloatingPanel();
-    if (store.get().currentScreen === 'settings') {
-      store.goBack();
-    } else {
-      store.navigate('settings');
-    }
-  });
-
-  // Close floating panel on backdrop click
-  document.getElementById('floatingPanelBackdrop')?.addEventListener('click', () => {
-    closeFloatingPanel();
-  });
-
-  // Global Drag & Drop for ROM files and folders
-  window.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-  });
-
-  window.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!e.dataTransfer?.files?.length) return;
-
-    let addedAny = false;
-    for (let i = 0; i < e.dataTransfer.files.length; i++) {
-      const file = e.dataTransfer.files[i];
-      const filePath = (file as any).path;
-      if (!filePath) continue;
-
-      try {
-        const item = await emuApi.library.addFile(filePath);
-        if (item) {
-          addedAny = true;
-          continue;
-        }
-      } catch {
-        // ignore
-      }
-
-      try {
-        await emuApi.library.addDirectory(filePath);
-        addedAny = true;
-      } catch {
-        // ignore
-      }
-    }
-
-    if (addedAny) {
+  const headerActions: [string, () => void][] = [
+    ['headerFinderBtn', () => toggleFloatingPanel('sessions')],
+    ['headerJoinBtn', () => toggleFloatingPanel('join')],
+    ['headerFriendsBtn', () => toggleFloatingPanel('friends')],
+    ['headerProfileBtn', () => toggleFloatingPanel('profile')],
+    ['vpsStatusChip', () => toggleFloatingPanel('server')],
+    ['headerSettingsBtn', toggleSettings],
+  ];
+  for (const [id, action] of headerActions) {
+    document.getElementById(id)?.addEventListener('click', () => {
       sfx.play('click');
-      const scanned = await emuApi.library.scan();
-      store.set({ roms: scanned });
-    }
-  });
+      action();
+    });
+  }
+  document.getElementById('floatingPanelBackdrop')?.addEventListener('click', () => closeFloatingPanel());
 
-  // 5. Load Config from disk
   const config = await emuApi.config.get();
   const cachedSgdbKey = localStorage.getItem('emufii_sgdb_key');
   if (!config.settings.steamGridDbKey && cachedSgdbKey) {
@@ -200,114 +275,72 @@ async function bootstrap() {
 
   document.body.dataset.theme = resolveTheme(config.settings.theme || 'dark');
   document.body.dataset.accent = config.settings.accent || 'teal';
+  document.body.classList.toggle('reduce-motion', config.settings.animations === false);
 
-  // Listen to OS system color-scheme changes when theme is set to 'system'
-  if (window.matchMedia) {
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      const currentSetting = store.get().settings.theme;
-      if (currentSetting === 'system') {
-        document.body.dataset.theme = resolveTheme('system');
-        trayBackdrop?.update();
-      }
-    });
-  }
-
-  // Initialize Animated Signature Tray Backdrop
-  const backdropCanvas = document.getElementById('trayBackdropCanvas') as HTMLCanvasElement;
-  if (backdropCanvas) {
-    trayBackdrop = new TrayBackdrop(backdropCanvas);
-  }
-
-  store.set({
-    profile: config.profile,
-    settings: config.settings,
+  window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (store.get().settings.theme === 'system') {
+      document.body.dataset.theme = resolveTheme('system');
+      trayBackdrop?.update();
+    }
   });
 
+  const backdropCanvas = document.getElementById('trayBackdropCanvas') as HTMLCanvasElement;
+  if (backdropCanvas) trayBackdrop = new TrayBackdrop(backdropCanvas);
+
+  store.set({ profile: config.profile, settings: config.settings });
   updateHeader(store.get());
 
-  // 6. Background metadata & library scan
   loadMetadataAndScan();
 
-  // 7. Dynamic Coordinator Connection Lamp Check
   checkCoordinatorStatus();
   setInterval(checkCoordinatorStatus, 30000);
 
-  // Periodic background presence announcement (matching EmufiiApp.kt PRESENCE_MS = 45s)
+  // Matches EmufiiApp.kt PRESENCE_MS = 45s
   const syncPresence = async () => {
     const s = store.get();
-    if (s.currentScreen === 'session' || s.activeSession) return;
+    if (s.currentScreen === 'session' || s.activeSession || getPresence() === 'offline') return;
     if (s.profile.id && s.profile.name) {
       try {
         await emuApi.coordinator.announcePresence(s.profile.id, s.profile.name, false);
-      } catch { }
+      } catch {}
     }
   };
   syncPresence();
   setInterval(syncPresence, 45000);
 
-  // Sync user's own avatar to coordinator on startup if set
   if (config.profile?.id && config.profile?.avatarDataUrl) {
     encodeAvatarToWebpBase64(config.profile.avatarDataUrl)
       .then((webpBase64) => {
         if (webpBase64) {
           emuApi.coordinator
-            .uploadAvatar(
-              config.profile.id,
-              config.profile.ownerKey || config.profile.id,
-              webpBase64
-            )
+            .uploadAvatar(config.profile.id, config.profile.ownerKey || config.profile.id, webpBase64)
             .catch(() => {});
         }
       })
       .catch(() => {});
   }
 
-  // Real-time friend status & friend request polling (every 5 seconds)
   const pollFriendsRealtime = () => {
     syncFriendsRealtime(() => {
-      if (isFloatingPanelOpen() && getFloatingPanelTab() === 'friends') {
-        renderFloatingPanel();
-      }
+      if (isFloatingPanelOpen() && getFloatingPanelTab() === 'friends') renderFloatingPanel();
     }).catch(() => {});
   };
   pollFriendsRealtime();
   setInterval(pollFriendsRealtime, 5000);
 
-  // Auto-check for updates on launch if Auto-Download Updates is enabled
   if (config.settings?.autoDownloadUpdates !== false && emuApi?.updates?.check) {
     setTimeout(() => {
       emuApi.updates
         .check()
-        .then((res: any) => {
-          if (res?.updateAvailable) {
-            openUpdateModal(res);
-          }
-        })
+        .then((res: any) => res?.updateAvailable && openUpdateModal(res))
         .catch(() => {});
     }, 3500);
   }
 
-  // 8. Subscribe to state changes and render screens
-  let lastFilter = store.get().consoleFilter;
-  let lastRomsCount = store.get().roms.length;
-  let lastQuery = store.get().searchQuery;
-  let lastLayout = store.get().settings.libraryLayout;
-  let lastSort = store.get().settings.librarySort;
-
+  let last = libraryKey(store.get());
   store.subscribe((state) => {
     updateHeader(state);
-
-    const filterChanged = lastFilter !== state.consoleFilter;
-    const romsChanged = lastRomsCount !== state.roms.length;
-    const queryChanged = lastQuery !== state.searchQuery;
-    const layoutChanged = lastLayout !== state.settings.libraryLayout;
-    const sortChanged = lastSort !== state.settings.librarySort;
-
-    lastFilter = state.consoleFilter;
-    lastRomsCount = state.roms.length;
-    lastQuery = state.searchQuery;
-    lastLayout = state.settings.libraryLayout;
-    lastSort = state.settings.librarySort;
+    document.body.classList.toggle('reduce-motion', state.settings.animations === false);
 
     const resolvedTheme = resolveTheme(state.settings.theme || 'dark');
     if (resolvedTheme !== document.body.dataset.theme) {
@@ -315,19 +348,36 @@ async function bootstrap() {
       trayBackdrop?.update();
     }
 
+    const key = libraryKey(state);
+    const libraryChanged = key !== last;
+    last = key;
+
     if (currentRenderedScreen !== state.currentScreen) {
       currentRenderedScreen = state.currentScreen;
       renderCurrentScreen(state.currentScreen, true);
-    } else if (
-      currentRenderedScreen === 'library' &&
-      (filterChanged || romsChanged || queryChanged || layoutChanged || sortChanged)
-    ) {
+    } else if (currentRenderedScreen === 'library' && libraryChanged) {
       renderCurrentScreen('library', false);
     }
   });
 
-  // Start with Splash Screen
   renderCurrentScreen('splash', true);
+}
+
+function libraryKey(state: AppState): string {
+  const s = state.settings;
+  return [
+    state.consoleFilter,
+    state.searchQuery,
+    state.roms.length,
+    state.roms.map((r) => r.id).join(','),
+    s.libraryLayout,
+    s.librarySort,
+    s.theme,
+    (s.hiddenRoms || []).join(','),
+    (s.hiddenConsoles || []).join(','),
+    s.hideIncompatible,
+    JSON.stringify(s.customTitles || {}),
+  ].join('|');
 }
 
 function updateHeader(state: AppState) {
@@ -336,113 +386,80 @@ function updateHeader(state: AppState) {
   const subtitleEl = document.getElementById('headerSubtitle');
   const titleEl = document.getElementById('headerTitle');
   const countEl = document.getElementById('headerCount');
-  const backBtn = document.getElementById('headerFolderBackBtn');
 
   if (avatarEl) {
-    if (state.profile.avatarDataUrl) {
-      avatarEl.innerHTML = `<img src="${state.profile.avatarDataUrl}" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+    const url = state.profile.avatarDataUrl;
+    const img = avatarEl.querySelector('img');
+    if (url) {
+      if (!img || img.src !== url) {
+        const next = document.createElement('img');
+        next.src = url;
+        next.alt = '';
+        avatarEl.replaceChildren(next);
+      }
     } else {
       avatarEl.textContent = (state.profile.name || 'J').slice(0, 2).toUpperCase();
     }
   }
 
-  if (dotEl) {
-    const presence = localStorage.getItem('emufii_presence') || 'online';
-    dotEl.className = `user-status-dot ${presence}`;
-  }
+  if (dotEl) dotEl.className = `user-status-dot ${getPresence()}`;
 
   if (subtitleEl) {
     const friendsList = state.settings.friends || [];
     const onlineCount = friendsList.filter((code) => !!state.friendStatuses?.present?.[code]).length;
-    if (friendsList.length === 0) {
-      subtitleEl.textContent = 'No friends online';
-    } else if (onlineCount > 0) {
-      subtitleEl.textContent = `${onlineCount} ${onlineCount === 1 ? 'friend' : 'friends'} online`;
-    } else {
-      subtitleEl.textContent = `0 of ${friendsList.length} friends online`;
-    }
+    subtitleEl.textContent =
+      friendsList.length === 0
+        ? state.profile.name || 'Player'
+        : onlineCount > 0
+        ? `${onlineCount} ${onlineCount === 1 ? 'friend' : 'friends'} online`
+        : `0 of ${friendsList.length} friends online`;
   }
 
-  // When inside a session (Create a Session or Play Online), remove the "< Library" button
   if (state.currentScreen === 'session') {
-    if (titleEl) {
-      titleEl.textContent = state.activeSession?.rom?.displayName || (state.activeSession?.code === 'ONLINE' ? 'Online' : 'Session');
-    }
-    if (countEl) {
-      countEl.textContent = state.activeSession?.code === 'ONLINE' ? 'Online play' : (state.activeSession?.isHost ? 'Host' : 'Guest');
-    }
-    if (backBtn) {
-      backBtn.style.display = 'none';
-    }
+    const session = state.activeSession;
+    if (titleEl) titleEl.textContent = session?.code === 'ONLINE' ? 'Online play' : 'Session';
+    if (countEl) countEl.textContent = session && session.code !== 'ONLINE' ? `${session.isHost ? 'Host' : 'Guest'} · ${session.code}` : '';
     return;
   }
 
   const isInFolder = state.currentScreen === 'library' && state.consoleFilter !== 'ALL';
-  const totalRoms = state.roms.filter((r: RomItem) => !state.settings.hiddenRoms?.includes(r.id));
-  const displayedCount = isInFolder
-    ? totalRoms.filter((r: RomItem) => r.console === state.consoleFilter).length
-    : totalRoms.length;
-  const countLabel = `${displayedCount} ${displayedCount === 1 ? 'game' : 'games'}`;
+  const visible = state.roms.filter((r: RomItem) => !state.settings.hiddenRoms?.includes(r.id));
+  const count = isInFolder
+    ? visible.filter((r: RomItem) => ((r.console as string) === 'GBA' ? 'DS' : r.console) === state.consoleFilter).length
+    : visible.length;
 
-  if (titleEl) {
-    titleEl.textContent = isInFolder ? state.consoleFilter : 'Library';
-  }
-  if (countEl) {
-    countEl.textContent = countLabel;
-  }
-  if (backBtn) {
-    backBtn.style.display = isInFolder ? 'inline-flex' : 'none';
-  }
+  if (titleEl) titleEl.textContent = isInFolder ? state.consoleFilter : 'Library';
+  if (countEl) countEl.textContent = `${count} ${count === 1 ? 'game' : 'games'}`;
 }
 
 async function loadMetadataAndScan() {
+  const indexByKeys = (games: any[]) => {
+    const map: Record<string, any> = {};
+    for (const g of games) for (const k of g.keys || []) map[k] = g;
+    return map;
+  };
   try {
-    const compat = await emuApi.library.fetchCompat();
-    if (compat?.games) {
-      const map: Record<string, any> = {};
-      for (const g of compat.games) {
-        for (const k of g.keys || []) {
-          map[k] = g;
-        }
-      }
-      store.set({ compatDb: map });
-    }
-
-    const meta = await emuApi.library.fetchMeta();
-    if (meta?.games) {
-      const map: Record<string, any> = {};
-      for (const g of meta.games) {
-        for (const k of g.keys || []) {
-          map[k] = g;
-        }
-      }
-      store.set({ metaDb: map });
-    }
-
-    // Scan ROMs
-    const scanned = await emuApi.library.scan();
-    store.set({ roms: scanned });
-  } catch (err) {
-    console.error('Scan failed:', err);
-  }
+    const [compat, meta] = await Promise.all([
+      emuApi.library.fetchCompat().catch(() => null),
+      emuApi.library.fetchMeta().catch(() => null),
+    ]);
+    if (compat?.games) store.set({ compatDb: indexByKeys(compat.games) });
+    if (meta?.games) store.set({ metaDb: indexByKeys(meta.games) });
+  } catch {}
+  await rescanLibrary();
 }
 
-function renderCurrentScreen(screen: ScreenType, animate: boolean = true) {
+function renderCurrentScreen(screen: ScreenType, animate = true) {
   if (cleanupCurrentScreen) {
     cleanupCurrentScreen();
     cleanupCurrentScreen = null;
   }
 
-  // Toggle header status band: hidden on splash or settings, visible on launcher
   const headerBand = document.getElementById('appHeaderBand');
-  if (headerBand) {
-    headerBand.style.display = (screen === 'splash' || screen === 'settings') ? 'none' : 'flex';
-  }
+  if (headerBand) headerBand.hidden = screen === 'splash' || screen === 'settings';
 
   const titlebarBrand = document.querySelector<HTMLElement>('.titlebar-brand');
-  if (titlebarBrand) {
-    titlebarBrand.style.visibility = screen === 'splash' ? 'hidden' : 'visible';
-  }
+  if (titlebarBrand) titlebarBrand.style.visibility = screen === 'splash' ? 'hidden' : 'visible';
 
   const host = document.getElementById('screenHost');
   if (!host) return;
@@ -452,11 +469,10 @@ function renderCurrentScreen(screen: ScreenType, animate: boolean = true) {
   if (animate) {
     const currentView = document.getElementById('currentScreenView');
     if (currentView) {
-      currentView.id = 'previousScreenView';
+      currentView.id = '';
       currentView.classList.add('screen-exiting');
-      setTimeout(() => {
-        currentView.remove();
-      }, 220);
+      currentView.setAttribute('inert', '');
+      setTimeout(() => currentView.remove(), 220);
     }
 
     const newView = document.createElement('div');
@@ -464,21 +480,8 @@ function renderCurrentScreen(screen: ScreenType, animate: boolean = true) {
     newView.id = 'currentScreenView';
     host.appendChild(newView);
     targetView = newView;
-
-    // Trigger entering animation
-    requestAnimationFrame(() => {
-      newView.classList.remove('screen-entering');
-    });
-
-    // Focus the first action element
-    setTimeout(() => {
-      const firstFocusable = newView.querySelector<HTMLElement>(
-        'button, input, .rom-tile, .chip, .keypad-btn'
-      );
-      if (firstFocusable) {
-        nav.setFocus(firstFocusable, false);
-      }
-    }, 100);
+    requestAnimationFrame(() => newView.classList.remove('screen-entering'));
+    setTimeout(() => nav.focusFirst(newView), 120);
   } else {
     let currentView = document.getElementById('currentScreenView');
     if (!currentView) {
@@ -487,13 +490,10 @@ function renderCurrentScreen(screen: ScreenType, animate: boolean = true) {
       currentView.id = 'currentScreenView';
       host.appendChild(currentView);
     }
-    if (screen !== 'library') {
-      currentView.innerHTML = '';
-    }
+    if (screen !== 'library') currentView.innerHTML = '';
     targetView = currentView;
   }
 
-  // Render matching component
   switch (screen) {
     case 'splash':
       cleanupCurrentScreen = renderSplashScreen(targetView) || null;
@@ -501,79 +501,50 @@ function renderCurrentScreen(screen: ScreenType, animate: boolean = true) {
     case 'library':
       cleanupCurrentScreen = renderLibraryScreen(targetView) || null;
       break;
-    case 'join':
-      cleanupCurrentScreen = renderJoinScreen(targetView) || null;
-      break;
     case 'session':
       cleanupCurrentScreen = renderSessionScreen(targetView) || null;
       break;
-    case 'friends':
-      renderFriendsScreen(targetView);
-      break;
-    case 'finder':
-      renderSessionFinderScreen(targetView);
-      break;
     case 'settings':
-      if (animate) {
-        resetSettingsView();
-      }
+      if (animate) resetSettingsView();
       renderSettingsScreen(targetView);
       break;
   }
 }
 
-function getRegionLabel(): string {
-  const region = localStorage.getItem('emufii_server_region') || 'auto';
-  const regionNames: Record<string, string> = {
-    auto: 'US East (NY)',
-    use: 'US East (NY)',
-    usw: 'US West (Seattle)',
-    eu: 'Europe',
-    na: 'Canada (Montréal)',
-    jp: 'Japan (Tokyo)',
-  };
-  return regionNames[region] || 'US East (NY)';
-}
+const REGION_NAMES: Record<string, string> = {
+  auto: 'US East (NY)',
+  use: 'US East (NY)',
+  usw: 'US West (Seattle)',
+  eu: 'Europe',
+  na: 'Canada (Montréal)',
+  jp: 'Japan (Tokyo)',
+};
 
 async function checkCoordinatorStatus() {
   const lamp = document.getElementById('vpsLamp');
   const chip = document.getElementById('vpsStatusChip');
   const text = document.getElementById('vpsText');
-  const regLabel = getRegionLabel();
+  const region = REGION_NAMES[localStorage.getItem('emufii_server_region') || 'auto'] || REGION_NAMES.auto;
+  let online = false;
+  let present = 0;
   try {
     const health = await emuApi.coordinator.checkHealth();
-    const isOnline = !!health?.ok;
-    if (lamp) {
-      lamp.className = isOnline ? 'lamp active' : 'lamp';
-    }
-    if (text) {
-      text.innerHTML = isOnline ? `Online &bull; ${regLabel}` : `Offline &bull; ${regLabel}`;
-    }
-    if (chip) {
-      chip.title = isOnline
-        ? `Coordinator Online${health.present ? ` (${health.present} players online)` : ''}`
-        : 'Coordinator Offline';
-    }
-    if (isOnline) {
-      refreshRelayLatencies().catch(() => {});
-    }
-  } catch {
-    if (lamp) {
-      lamp.className = 'lamp';
-    }
-    if (text) {
-      text.innerHTML = `Offline &bull; ${regLabel}`;
-    }
-    if (chip) {
-      chip.title = 'Cannot connect to Coordinator';
-    }
+    online = !!health?.ok;
+    present = health?.present || 0;
+  } catch {}
+
+  if (lamp) lamp.className = online ? 'lamp active' : 'lamp';
+  if (text) text.textContent = `${online ? 'Online' : 'Offline'} • ${region}`;
+  if (chip) {
+    chip.title = online
+      ? `Coordinator online${present ? ` (${present} players)` : ''} · Click to pick a relay region`
+      : 'Cannot reach the Emufii coordinator';
   }
+  if (online) refreshRelayLatencies().catch(() => {});
 }
 
-// Bootstrap on DOM ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', bootstrap);
 } else {
   bootstrap();
 }
-

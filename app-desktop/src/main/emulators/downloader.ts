@@ -192,18 +192,24 @@ export class EmulatorDownloader {
     let receivedBytes = 0;
     const fileStream = fs.createWriteStream(destPath);
 
-    for await (const chunk of response.body as any) {
-      fileStream.write(chunk);
-      receivedBytes += chunk.length;
-      if (totalBytes > 0) {
-        const percent = Math.min(92, Math.round((receivedBytes / totalBytes) * 85) + 5);
-        onProgress?.(
-          percent,
-          `Downloading ${label}... ${Math.round(receivedBytes / 1024 / 1024)}MB / ${Math.round(totalBytes / 1024 / 1024)}MB`
-        );
-      } else {
-        onProgress?.(50, `Downloading ${label}... ${Math.round(receivedBytes / 1024 / 1024)}MB`);
+    try {
+      for await (const chunk of response.body as any) {
+        if (!fileStream.write(chunk)) await new Promise<void>((r) => fileStream.once('drain', () => r()));
+        receivedBytes += chunk.length;
+        if (totalBytes > 0) {
+          const percent = Math.min(92, Math.round((receivedBytes / totalBytes) * 85) + 5);
+          onProgress?.(
+            percent,
+            `Downloading ${label}... ${Math.round(receivedBytes / 1024 / 1024)}MB / ${Math.round(totalBytes / 1024 / 1024)}MB`
+          );
+        } else {
+          onProgress?.(50, `Downloading ${label}... ${Math.round(receivedBytes / 1024 / 1024)}MB`);
+        }
       }
+    } catch (err) {
+      fileStream.destroy();
+      try { fs.unlinkSync(destPath); } catch {}
+      throw err;
     }
 
     await new Promise<void>((resolve, reject) => {

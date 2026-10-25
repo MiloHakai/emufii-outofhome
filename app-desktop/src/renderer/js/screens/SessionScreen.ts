@@ -8,139 +8,70 @@ import {
 } from '../components/FriendActionModal.js';
 import { toggleFloatingPanel } from '../components/FloatingPanel.js';
 import { formatFriendCode } from '../../../main/profile/friendCode.js';
-import type { RemoteSession } from '../../../main/network/coordinator.js';
+import { esc, initials } from '../html.js';
+import { toast, errorMessage } from '../toast.js';
+import { romTitle, getConsoleFriendlyName } from './LibraryScreen.js';
+import { openModal } from '../dialogs.js';
 
 const invitedInSession = new Set<string>();
 
 function openInviteFriendsModal(sessionCode: string) {
   const emuApi = (window as any).emufii;
   const state = store.get();
-  const friends = state.settings.friends || [];
+  const friends = [...(state.settings.friends || [])].sort(
+    (a, b) => Number(resolveFriendActivity(b).isOnline) - Number(resolveFriendActivity(a).isOnline)
+  );
 
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-backdrop visible';
-  overlay.style.cssText = `
-    position: fixed;
-    inset: 0;
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(8, 6, 14, 0.72);
-    backdrop-filter: blur(10px);
-    animation: fadeIn 160ms ease-out;
-  `;
-
-  overlay.innerHTML = `
-    <div class="plate modal-window" role="dialog" aria-modal="true" aria-labelledby="inviteFriendsModalTitle" style="width: 440px; max-width: calc(100vw - 32px); padding: 24px; border-radius: 24px; display: flex; flex-direction: column; gap: 14px; border: 1px solid var(--plate-border); box-shadow: 0 24px 48px rgba(0, 0, 0, 0.55);">
-      <div style="display: flex; align-items: center; justify-content: space-between;">
-        <div>
-          <h3 id="inviteFriendsModalTitle" style="margin: 0 0 2px 0; font-size: 18px; font-weight: 800; color: var(--ink-primary);">
-            Invite Friends to Room ${sessionCode}
-          </h3>
-          <p style="margin: 0; font-size: 12px; color: var(--ink-secondary);">
-            Send a direct room invite to your friends
-          </p>
-        </div>
-        <button class="cloud-close-btn plate-button" id="btnCloseInviteModal" title="Close">&times;</button>
-      </div>
-
-      <div style="display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto;">
+  const modal = openModal(
+    `
+      <h3 class="modal-title">Invite friends to ${esc(sessionCode)}</h3>
+      <p class="modal-desc">They get a notification with a one-click Join button.</p>
+      <div class="panel-list modal-list">
         ${
           friends.length === 0
-            ? `
-          <div style="padding: 24px 12px; text-align: center; color: var(--ink-secondary); font-size: 13px;">
-            You have not added any friends yet.
-          </div>
-        `
+            ? '<div class="panel-empty compact"><span>You have not added any friends yet.</span></div>'
             : friends
                 .map((code) => {
                   const name = resolveFriendDisplayName(code);
                   const avatar = resolveFriendAvatar(code);
                   const activity = resolveFriendActivity(code);
-                  const inviteKey = `${sessionCode}:${code}`;
-                  const alreadySent = invitedInSession.has(inviteKey);
-
+                  const alreadySent = invitedInSession.has(`${sessionCode}:${code}`);
+                  const presence = activity.isOnline ? 'online' : 'offline';
                   return `
-            <div class="plate" style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: var(--radius-sm);">
-              <div style="display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1;">
-                <div style="position: relative; flex-shrink: 0;">
-                  <div style="width: 34px; height: 34px; border-radius: 50%; background: var(--bg-shelf); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; color: var(--accent-bright); border: 1.5px solid var(--plate-border); overflow: hidden;">
-                    ${
-                      avatar
-                        ? `<img src="${avatar}" alt="${name}" style="width: 100%; height: 100%; object-fit: cover;">`
-                        : name.slice(0, 2).toUpperCase()
-                    }
-                  </div>
-                  <div style="position: absolute; bottom: -1px; right: -1px; width: 9px; height: 9px; border-radius: 50%; background: ${
-                    activity.isOnline ? 'var(--compat-perfect)' : 'var(--ink-tertiary)'
-                  }; border: 1.5px solid var(--plate-bg);"></div>
-                </div>
-                <div style="min-width: 0; flex: 1;">
-                  <div style="font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${name}</div>
-                  <div style="font-size: 11px; color: var(--ink-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                    ${activity.statusText || formatFriendCode(code)}
-                  </div>
-                </div>
+            <div class="panel-row">
+              <div class="panel-avatar-wrap">
+                <div class="panel-avatar" style="width: 34px; height: 34px;">${avatar ? `<img src="${esc(avatar)}" alt="">` : `<span>${initials(name, 'F')}</span>`}</div>
+                <span class="presence-dot ${presence}"></span>
               </div>
-              <button class="${alreadySent ? 'btn-secondary' : 'btn-primary'} plate-button btn-send-session-invite" data-code="${code}" ${alreadySent ? 'disabled' : ''} style="height: 28px; padding: 0 12px; font-size: 11px; width: auto; border-radius: 9999px;">
-                ${alreadySent ? '✓ Sent' : 'Invite'}
+              <div class="panel-row-main">
+                <div class="panel-row-title">${esc(name)}</div>
+                <div class="panel-row-sub ${presence}">${esc(activity.statusText || formatFriendCode(code))}</div>
+              </div>
+              <button class="${alreadySent ? 'btn-secondary' : 'btn-primary'} plate-button btn-small btn-send-session-invite" data-code="${esc(code)}" ${alreadySent ? 'disabled' : ''}>
+                ${alreadySent ? 'Sent' : 'Invite'}
               </button>
-            </div>
-          `;
+            </div>`;
                 })
                 .join('')
         }
       </div>
-
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;">
-        ${
-          friends.length === 0
-            ? `<button class="btn-primary plate-button" id="btnOpenFriendsFromInvite" style="height: 36px; padding: 0 16px; font-size: 12px; border-radius: 9999px; width: auto;">Add Friends</button>`
-            : ''
-        }
-        <button class="btn-secondary plate-button" id="btnDoneInviteModal" style="height: 36px; padding: 0 18px; font-size: 12px; border-radius: 9999px;">
-          Done
-        </button>
+      <div class="modal-actions">
+        ${friends.length === 0 ? '<button class="btn-primary plate-button" id="btnOpenFriendsFromInvite">Add friends</button>' : ''}
+        <button class="btn-secondary plate-button" id="btnDoneInviteModal">Done</button>
       </div>
-    </div>
-  `;
+    `,
+    { width: 460, label: `Invite friends to ${sessionCode}` }
+  );
+  const overlay = modal.window;
 
-  document.body.appendChild(overlay);
-
-  const cleanup = () => {
-    window.removeEventListener('keydown', onKeyDown, true);
-    overlay.remove();
-  };
-
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      sfx.play('click');
-      cleanup();
-    }
-  };
-  window.addEventListener('keydown', onKeyDown, true);
-
-  overlay.querySelector('#btnCloseInviteModal')?.addEventListener('click', () => {
-    sfx.play('click');
-    cleanup();
-  });
   overlay.querySelector('#btnDoneInviteModal')?.addEventListener('click', () => {
     sfx.play('click');
-    cleanup();
+    modal.close();
   });
   overlay.querySelector('#btnOpenFriendsFromInvite')?.addEventListener('click', () => {
     sfx.play('click');
-    cleanup();
+    modal.close();
     toggleFloatingPanel('friends');
-  });
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      sfx.play('click');
-      cleanup();
-    }
   });
 
   overlay.querySelectorAll('.btn-send-session-invite').forEach((btn) => {
@@ -172,221 +103,202 @@ function openInviteFriendsModal(sessionCode: string) {
   });
 }
 
+function pingClass(ms: number | null): string {
+  if (ms === null) return 'unknown';
+  return ms < 60 ? 'good' : ms < 130 ? 'fair' : 'poor';
+}
+
+const COPY_ICON =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+function copyButton(id: string, label: string): string {
+  return `<button class="session-copy-btn" id="${id}" title="Copy ${label}" aria-label="Copy ${label}">${COPY_ICON}</button>`;
+}
+
 export function renderSessionScreen(container: HTMLElement) {
   const emuApi = (window as any).emufii;
   let pollTimer: any = null;
   let currentPingMs: number | null = null;
+  let lastKey = '';
+
+  const copy = (text: string, what: string) => {
+    navigator.clipboard.writeText(text);
+    sfx.play('click');
+    toast(`${what} copied`, 'success', 1500);
+  };
 
   const update = () => {
     const session = store.get().activeSession;
     if (!session) {
-      container.innerHTML = `<div style="padding: 32px;">No active session.</div>`;
+      container.innerHTML = '<div class="session-empty">No active session.</div>';
+      lastKey = '';
       return;
     }
+
+    const key = JSON.stringify([session, store.get().profile.name]);
+    if (key === lastKey) return;
+    lastKey = key;
+
+    const hadFocusId = container.contains(document.activeElement) ? (document.activeElement as HTMLElement).id : '';
 
     const isHost = session.isHost;
     const isOnline = session.code === 'ONLINE';
     const remote = session.remote;
     const wg = session.wireguard;
-    const isPsp = session.rom?.console === 'PSP';
-    const isDolphin = session.rom?.console === 'GameCube' || session.rom?.console === 'Wii';
-    const isPs2 = session.rom?.console === 'PS2';
+    const consoleType = session.rom?.console;
+    const isPsp = consoleType === 'PSP';
+    const isDolphin = consoleType === 'GameCube' || consoleType === 'Wii';
+    const isPs2 = consoleType === 'PS2';
 
-    // PPSSPP ad hoc server uses fixed sentinel address 10.66.1.1 (matches Session.kt shownAddress)
-    const displayIp = isPsp
-      ? '10.66.1.1'
-      : isHost
-      ? (wg?.address || '10.67.0.2')
-      : (remote?.hostIp || '10.67.0.2');
-
-    // Default netplay port matching Console.kt backend.defaultNetplayPort:
-    // Dolphin: 2626, PS2: 19072, MelonDS: 7000, 3DS/Switch: 24872
-    const defaultPort = isDolphin ? 2626 : isPs2 ? 19072 : session.rom?.console === 'DS' ? 7000 : 24872;
+    // PPSSPP's ad hoc server uses the fixed sentinel address 10.66.1.1 (Session.kt shownAddress)
+    const displayIp = isPsp ? '10.66.1.1' : isHost ? wg?.address || '10.67.0.2' : remote?.hostIp || '10.67.0.2';
+    // Console.kt backend.defaultNetplayPort: Dolphin 2626, PS2 19072, melonDS 7000, 3DS/Switch 24872
+    const defaultPort = isDolphin ? 2626 : isPs2 ? 19072 : consoleType === 'DS' ? 7000 : 24872;
     const displayPort = remote?.port || defaultPort;
+
+    const members: any[] = remote?.members?.length
+      ? remote.members
+      : [{ id: store.get().profile.id, name: store.get().profile.name, forSeconds: 0 }];
+
+    const step2Desc = isOnline
+      ? session.step2Done
+        ? 'Emulator running'
+        : 'Ready to start the game'
+      : isHost
+      ? 'Launch the game, then open your room in the emulator'
+      : remote?.hostReady
+      ? 'The host is ready. Launch to connect.'
+      : 'Waiting for the host to open the room…';
+
+    const wgConf = session.wireguardConfigPath || 'emufii0.conf';
+    const isWindows = navigator.userAgent.includes('Windows');
+    const wgCmd = isWindows ? `wireguard /installtunnelservice "${wgConf}"` : `sudo wg-quick up "${wgConf}"`;
 
     container.innerHTML = `
       <div class="session-screen">
-        <!-- Left Panel: State -->
-        <div class="session-left">
-          <div class="code-display-card" style="border-radius: 24px;">
-            <div style="font-size: 13px; font-weight: 700; color: var(--ink-secondary); text-transform: uppercase; letter-spacing: 1px;">
-              ${isOnline ? 'Online Play' : 'Session Code'}
-            </div>
-            <div class="code-value" style="${isOnline ? 'font-size: 32px; letter-spacing: 2px;' : ''}">${session.code}</div>
-            ${!isOnline ? `
-            <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
-              <button class="btn-secondary plate-button" id="btnCopyCode" style="height: 36px; padding: 0 16px; font-size: 12px; border-radius: 9999px;">
-                Copy Code
-              </button>
-              <button class="btn-primary plate-button" id="btnInviteFriendsSession" style="height: 36px; padding: 0 16px; font-size: 12px; border-radius: 9999px; width: auto;">
-                Invite Friends
-              </button>
-            </div>
-            ` : `
-            <div style="font-size: 12px; color: var(--ink-secondary);">Direct connection to multiplayer servers</div>
-            `}
+        <section class="session-left">
+          <div class="code-display-card plate">
+            <div class="session-card-label">${isOnline ? 'Online play' : 'Session code'}</div>
+            <div class="code-value ${isOnline ? 'small' : ''}">${esc(session.code)}</div>
+            ${
+              isOnline
+                ? '<div class="session-card-hint">Direct connection to the game’s online servers</div>'
+                : `<div class="session-code-actions">
+                    <button class="btn-secondary plate-button btn-small" id="btnCopyCode">${COPY_ICON} Copy code</button>
+                    <button class="btn-primary plate-button btn-small" id="btnInviteFriendsSession">Invite friends</button>
+                  </div>`
+            }
           </div>
 
-          <!-- Connection Details Card -->
-          <div class="plate" style="padding: 20px; display: flex; flex-direction: column; gap: 12px; border-radius: 24px;">
-            <div style="font-size: 13px; font-weight: 700; color: var(--ink-secondary);">${isOnline ? 'Network Mode' : 'Tunnel & Address'}</div>
-            <div style="display: flex; justify-content: space-between; align-items: center; background: var(--plate-bg-low); padding: 10px 14px; border-radius: 18px; font-family: var(--font-family); font-size: 14px;">
-              <span>${isOnline ? 'Service: <strong>Public Online Ready</strong>' : `Address: <strong>${displayIp}</strong>`}</span>
-              ${isOnline ? '<span class="lamp active"></span>' : '<button class="btn-secondary plate-button" style="height: 28px; padding: 0 12px; font-size: 11px; border-radius: 9999px;" id="btnCopyIp">Copy</button>'}
+          <div class="plate session-card">
+            <div class="session-card-label">${isOnline ? 'Network' : 'Connection'}</div>
+            <div class="session-info-rows">
+              ${
+                isOnline
+                  ? '<div class="session-info-row"><span>Service</span><strong>Public online</strong><span class="lamp active"></span></div>'
+                  : `
+                <div class="session-info-row"><span>Address</span><strong>${esc(displayIp)}</strong>${copyButton('btnCopyIp', 'address')}</div>
+                ${isPsp ? '' : `<div class="session-info-row"><span>Port</span><strong>${esc(displayPort)}</strong>${copyButton('btnCopyPort', 'port')}</div>`}
+                <div class="session-info-row"><span>Ping</span><strong id="sessionLivePingValue">${currentPingMs !== null ? `${currentPingMs} ms` : 'Measuring…'}</strong><span class="ping-dot ${pingClass(currentPingMs)}" id="sessionLivePingDot"></span></div>`
+              }
             </div>
-            ${!isOnline && !isPsp ? `
-            <div style="display: flex; justify-content: space-between; align-items: center; background: var(--plate-bg-low); padding: 10px 14px; border-radius: 18px; font-family: var(--font-family); font-size: 14px;">
-              <span>Port: <strong>${displayPort}</strong></span>
-              <button class="btn-secondary plate-button" style="height: 28px; padding: 0 12px; font-size: 11px; border-radius: 9999px;" id="btnCopyPort">Copy</button>
-            </div>
-            ` : ''}
-            ${!isOnline ? `
-            <div style="display: flex; justify-content: space-between; align-items: center; background: var(--plate-bg-low); padding: 10px 14px; border-radius: 18px; font-family: var(--font-family); font-size: 14px;">
-              <span>Ping: <strong id="sessionLivePingValue">${currentPingMs !== null ? `${currentPingMs} ms` : 'Measuring...'}</strong></span>
-              <span id="sessionLivePingDot" style="width: 10px; height: 10px; border-radius: 50%; background: ${
-                currentPingMs === null
-                  ? 'var(--ink-tertiary)'
-                  : currentPingMs < 60
-                  ? '#10b981'
-                  : currentPingMs < 130
-                  ? '#f59e0b'
-                  : '#ef4444'
-              };"></span>
-            </div>
-            ` : ''}
           </div>
 
-          <!-- Players Card -->
-          <div class="plate" style="flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; border-radius: 24px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-size: 13px; font-weight: 700; color: var(--ink-secondary);">${isOnline ? 'Current Player' : 'Players'}</span>
-              <span class="lamp active"></span>
-            </div>
+          <div class="plate session-card session-players">
+            <div class="session-card-label">${isOnline ? 'Player' : `Players · ${members.length}`}</div>
             <div class="member-list" id="sessionMemberList">
-              ${(remote?.members || [{ id: store.get().profile.id, name: store.get().profile.name, forSeconds: 0 }])
+              ${members
                 .map(
                   (m: any) => `
-                <div class="member-row" style="border-radius: 18px;">
-                  <div class="chip-avatar">${m.name.slice(0, 2).toUpperCase()}</div>
-                  <div style="flex: 1;">
-                    <div style="font-size: 14px;">${m.name}</div>
-                    <div style="font-size: 11px; color: var(--ink-secondary);">${m.forSeconds ? Math.floor(m.forSeconds / 60) + 'm in room' : 'Connected'}${typeof m.rttMs === 'number' ? ` · ${m.rttMs} ms` : ''}</div>
+                <div class="member-row">
+                  <div class="chip-avatar">${initials(m.name, '?')}</div>
+                  <div class="member-info">
+                    <div class="member-name">${esc(m.name || 'Player')}${m.id === store.get().profile.id ? ' <span class="member-you">you</span>' : ''}</div>
+                    <div class="member-sub">${m.forSeconds ? `${Math.floor(m.forSeconds / 60)} min in room` : 'Connected'}${typeof m.rttMs === 'number' ? ` · ${m.rttMs} ms` : ''}</div>
                   </div>
-                </div>
-              `
+                </div>`
                 )
                 .join('')}
             </div>
           </div>
-        </div>
+        </section>
 
-        <!-- Right Panel: Actions and Steps -->
-        <div class="session-right">
-          <div style="font-size: 20px; font-weight: 900; margin-bottom: 4px;">
-            ${session.rom ? session.rom.displayName : 'Multiplayer Session'}
-          </div>
-          <div style="font-size: 14px; color: var(--ink-secondary); margin-bottom: 12px;">
-            ${isOnline ? 'Online play via public community server' : (isHost ? 'You are hosting this session' : 'You are joined as a guest')}
-          </div>
-
-          <!-- Step 1 -->
-          <div class="step-card" style="border-radius: 20px;">
-            <div class="step-num ${session.step1Done ? 'done' : ''}">
-              ${session.step1Done ? `&#10003;` : '1'}
+        <section class="session-right">
+          <div class="session-title-block">
+            <h1 class="session-title">${esc(session.rom ? romTitle(session.rom) : 'Multiplayer session')}</h1>
+            <div class="session-subtitle">
+              ${consoleType ? `${esc(getConsoleFriendlyName(consoleType))} · ` : ''}${isOnline ? 'Online play' : isHost ? 'You are hosting' : 'You joined as a guest'}
             </div>
+          </div>
+
+          <div class="step-card plate">
+            <div class="step-num ${session.step1Done ? 'done' : ''}">${session.step1Done ? '✓' : '1'}</div>
             <div class="step-info">
-              <div class="step-title">Configure Network & Emulator</div>
-              <div class="step-desc">
-                ${isOnline ? 'Online multiplayer connection ready' : (session.step1Done ? (session.wireguardNative === false ? 'Tunnel config prepared (manual sudo elevation required)' : 'WireGuard tunnel active and emulator prepared') : 'Connecting to session relay...')}
-              </div>
+              <div class="step-title">Network</div>
+              <div class="step-desc">${
+                isOnline
+                  ? 'Online connection ready'
+                  : session.step1Done
+                  ? session.wireguardNative === false
+                    ? 'Tunnel prepared — it needs to be started manually (see below)'
+                    : 'Secure tunnel active'
+                  : 'Connecting to the session relay…'
+              }</div>
             </div>
-            ${!session.step1Done && session.netplayBusy ? `<div class="spinner"></div>` : ''}
+            ${!session.step1Done && session.netplayBusy ? '<div class="spinner"></div>' : ''}
           </div>
 
           ${
             !isOnline && session.wireguardNative === false
               ? `
-            <div class="plate" style="padding: 16px; border-left: 4px solid var(--compat-partial); display: flex; flex-direction: column; gap: 8px; border-radius: 20px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span class="lamp" style="background-color: var(--compat-partial);"></span>
-                <strong style="font-size: 13px;">Tunnel Elevation Required</strong>
+            <div class="plate session-warning">
+              <strong>Start the tunnel manually</strong>
+              <p>${
+                isWindows
+                  ? 'WireGuard needs administrator rights. Install <a href="https://www.wireguard.com/install/" target="_blank" rel="noreferrer">WireGuard for Windows</a>, then run this in an administrator terminal (or import the file in the WireGuard app):'
+                  : 'WireGuard needs root rights on this system. Run this in a terminal:'
+              }</p>
+              <div class="session-cmd">
+                <code id="wgCmdText">${esc(wgCmd)}</code>
+                ${copyButton('btnCopyWgCmd', 'command')}
               </div>
-              <div style="font-size: 12px; color: var(--ink-secondary); line-height: 1.4;">
-                WireGuard requires root/sudo privileges to activate the interface on your OS. Run in terminal:
-              </div>
-              <div style="display: flex; gap: 8px; align-items: center; background: var(--plate-bg-low); padding: 8px 12px; border-radius: 16px; font-family: monospace; font-size: 12px;">
-                <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" id="wgCmdText">sudo wg-quick up "${session.wireguardConfigPath || 'emufii0.conf'}"</span>
-                <button class="btn-secondary plate-button" id="btnCopyWgCmd" style="height: 28px; padding: 0 12px; font-size: 11px; border-radius: 9999px;">Copy</button>
-              </div>
-            </div>
-          `
+            </div>`
               : ''
           }
 
-          <!-- Step 2 -->
-          <div class="step-card" style="border-radius: 20px;">
-            <div class="step-num ${session.step2Done ? 'done' : ''}">
-              ${session.step2Done ? `&#10003;` : '2'}
-            </div>
+          <div class="step-card plate">
+            <div class="step-num ${session.step2Done ? 'done' : ''}">${session.step2Done ? '✓' : '2'}</div>
             <div class="step-info">
-              <div class="step-title">Multiplayer In-Game</div>
-              <div class="step-desc">
-                ${isOnline ? (session.step2Done ? 'Emulator launched' : 'Ready to start game in emulator') : (isHost ? 'Host your room in the emulator' : (remote?.hostReady ? 'Host is ready! Launch emulator to connect' : 'Waiting for host to open room...'))}
-              </div>
+              <div class="step-title">Play</div>
+              <div class="step-desc">${step2Desc}</div>
             </div>
-            <button class="plate-button ${session.step2Done ? '' : 'btn-primary'}" id="btnLaunchEmu" style="width: auto; height: 38px; padding: 0 20px; font-size: 13px; border-radius: 9999px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 800; cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); ${
-              session.step2Done
-                ? 'background: #22c55e !important; color: #ffffff !important; border: 1px solid #16a34a !important; box-shadow: 0 4px 18px rgba(34, 197, 94, 0.4);'
-                : ''
-            }">
-              ${
-                session.launching
-                  ? `<div class="spinner" style="width: 14px; height: 14px; border: 2px solid rgba(255, 255, 255, 0.25); border-top-color: currentColor; border-radius: 50%; animation: spin 800ms linear infinite;"></div><span>Launching...</span>`
-                  : session.step2Done
-                  ? `✓ Launched`
-                  : `Launch`
-              }
+            <button class="plate-button ${session.step2Done ? 'btn-success' : 'btn-primary'} btn-launch" id="btnLaunchEmu" ${session.launching || !session.rom ? 'disabled' : ''} title="${session.rom ? '' : 'This game is not in your library'}">
+              ${session.launching ? '<span class="spinner small"></span><span>Launching…</span>' : session.step2Done ? 'Running' : 'Launch'}
             </button>
           </div>
+          ${
+            !session.rom && !isHost
+              ? '<div class="session-note">You don’t have this game in your library. Add it, then rejoin the session.</div>'
+              : ''
+          }
 
-          <div style="flex: 1;"></div>
-
-          <!-- Leave Button -->
-          <div style="display: flex; justify-content: flex-end;">
-            <button class="btn-secondary plate-button" id="btnLeaveSession" style="color: var(--compat-broken); border-color: rgba(224, 69, 123, 0.3); border-radius: 9999px; height: 42px; padding: 0 24px;">
-              ${isOnline ? 'Exit Game' : 'Leave Session'}
-            </button>
+          <div class="session-footer">
+            <button class="btn-danger plate-button" id="btnLeaveSession">${isOnline ? 'Exit game' : isHost ? 'End session' : 'Leave session'}</button>
           </div>
-        </div>
+        </section>
       </div>
     `;
 
-    // Event listeners
-    container.querySelector('#btnCopyCode')?.addEventListener('click', () => {
-      navigator.clipboard.writeText(session.code);
-      sfx.play('click');
-    });
+    if (hadFocusId) container.querySelector<HTMLElement>(`#${CSS.escape(hadFocusId)}`)?.focus({ preventScroll: true });
 
+    container.querySelector('#btnCopyCode')?.addEventListener('click', () => copy(session.code, 'Session code'));
     container.querySelector('#btnInviteFriendsSession')?.addEventListener('click', () => {
       sfx.play('click');
       openInviteFriendsModal(session.code);
     });
-
-    container.querySelector('#btnCopyIp')?.addEventListener('click', () => {
-      navigator.clipboard.writeText(displayIp);
-      sfx.play('click');
-    });
-
-    container.querySelector('#btnCopyPort')?.addEventListener('click', () => {
-      navigator.clipboard.writeText(displayPort.toString());
-      sfx.play('click');
-    });
-
-    container.querySelector('#btnCopyWgCmd')?.addEventListener('click', () => {
-      const cmd = `sudo wg-quick up "${session.wireguardConfigPath || 'emufii0.conf'}"`;
-      navigator.clipboard.writeText(cmd);
-      sfx.play('click');
-    });
+    container.querySelector('#btnCopyIp')?.addEventListener('click', () => copy(displayIp, 'Address'));
+    container.querySelector('#btnCopyPort')?.addEventListener('click', () => copy(String(displayPort), 'Port'));
+    container.querySelector('#btnCopyWgCmd')?.addEventListener('click', () => copy(wgCmd, 'Command'));
 
     container.querySelector('#btnLaunchEmu')?.addEventListener('click', async () => {
       sfx.play('click');
@@ -403,13 +315,9 @@ export function renderSessionScreen(container: HTMLElement) {
       }
 
       try {
-        if (store.get().settings.shareLastGame !== false && current.rom) {
+        if (store.get().settings.shareLastGame !== false) {
           emuApi.coordinator
-            .announceLastGame(
-              store.get().profile.id,
-              current.rom.displayName,
-              current.rom.titleId || current.rom.productCode
-            )
+            .announceLastGame(store.get().profile.id, current.rom.displayName, current.rom.titleId || current.rom.productCode)
             .catch(() => {});
         }
 
@@ -425,35 +333,20 @@ export function renderSessionScreen(container: HTMLElement) {
         });
 
         const updated = store.get().activeSession;
-        if (updated) {
-          store.set({
-            activeSession: {
-              ...updated,
-              step2Done: res?.success === true,
-              launching: false,
-            },
-          });
-        }
-
+        if (updated) store.set({ activeSession: { ...updated, step2Done: res?.success === true, launching: false } });
         if (res && !res.success) {
-          alert(res.message || `Could not launch ${current.rom.console} emulator. Check Settings to set its executable path.`);
+          toast(res.message || `Could not launch the ${current.rom.console} emulator. Set its path in Settings › Emulators.`, 'error');
         }
-      } catch (err: any) {
+      } catch (err) {
         const updated = store.get().activeSession;
-        if (updated) {
-          store.set({
-            activeSession: {
-              ...updated,
-              launching: false,
-            },
-          });
-        }
-        alert('Failed to launch emulator: ' + (err.message || err));
+        if (updated) store.set({ activeSession: { ...updated, launching: false } });
+        toast(`Could not launch the emulator: ${errorMessage(err, 'unknown error')}`, 'error');
       }
     });
 
-    container.querySelector('#btnLeaveSession')?.addEventListener('click', async () => {
+    container.querySelector('#btnLeaveSession')?.addEventListener('click', async (e) => {
       sfx.play('click');
+      (e.currentTarget as HTMLButtonElement).disabled = true;
       clearInterval(pollTimer);
       try {
         await emuApi.emulators.killActiveGame?.();
@@ -466,9 +359,11 @@ export function renderSessionScreen(container: HTMLElement) {
             await emuApi.coordinator.leaveSession(session.code, store.get().profile.id);
           }
         } catch {}
-        await emuApi.wireguard.down();
+        try {
+          await emuApi.wireguard.down();
+        } catch {}
       }
-      store.set({ activeSession: null });
+      store.set({ activeSession: null, selectedRom: null });
       store.navigate('library');
     });
   };
@@ -476,19 +371,15 @@ export function renderSessionScreen(container: HTMLElement) {
   update();
 
   const unsubscribe = store.subscribe((state) => {
-    if (state.currentScreen === 'session') {
-      update();
-    }
+    if (state.currentScreen === 'session') update();
   });
 
   const unsubscribeGameClosed = emuApi?.emulators?.onGameClosed?.(() => {
     const current = store.get().activeSession;
-    if (current && current.step2Done) {
-      store.set({ activeSession: { ...current, step2Done: false } });
-    }
+    if (current && current.step2Done) store.set({ activeSession: { ...current, step2Done: false } });
   });
 
-  // Polling loop for session heartbeats, live RTT ping, and members
+  // Heartbeat, live RTT and member list, every 4 s like the Android client
   const poll = async () => {
     const session = store.get().activeSession;
     if (!session || session.code === 'ONLINE') return;
@@ -497,28 +388,18 @@ export function renderSessionScreen(container: HTMLElement) {
       if (emuApi.coordinator.pingHost) {
         const measured = await emuApi.coordinator.pingHost(endpointHost);
         if (typeof measured === 'number') {
-          currentPingMs = measured;
+          currentPingMs = Math.round(measured);
           const pingEl = container.querySelector('#sessionLivePingValue');
-          const dotEl = container.querySelector('#sessionLivePingDot') as HTMLElement | null;
-          if (pingEl) pingEl.textContent = `${measured} ms`;
-          if (dotEl) {
-            dotEl.style.background =
-              measured < 60 ? '#10b981' : measured < 130 ? '#f59e0b' : '#ef4444';
-          }
+          const dotEl = container.querySelector('#sessionLivePingDot');
+          if (pingEl) pingEl.textContent = `${currentPingMs} ms`;
+          if (dotEl) dotEl.className = `ping-dot ${pingClass(currentPingMs)}`;
         }
       }
 
-      await emuApi.coordinator.heartbeat(
-        session.code,
-        store.get().profile.id,
-        store.get().profile.name,
-        currentPingMs ?? undefined
-      );
+      await emuApi.coordinator.heartbeat(session.code, store.get().profile.id, store.get().profile.name, currentPingMs ?? undefined);
       const remote = await emuApi.coordinator.getSession(session.code);
       const current = store.get().activeSession;
-      if (current && current.code === session.code) {
-        store.set({ activeSession: { ...current, remote } });
-      }
+      if (current && current.code === session.code) store.set({ activeSession: { ...current, remote } });
     } catch {}
   };
 

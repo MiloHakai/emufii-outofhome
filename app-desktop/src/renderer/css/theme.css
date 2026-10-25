@@ -32,6 +32,9 @@
   --radius-art: 16px;   /* ArtworkShape */
   --radius-tile: 20px;  /* TileShape */
   --radius-card: 28px;  /* CardCorner */
+  --radius-lg: 24px;
+  --radius-md: 14px;
+  --radius-xl: 28px;
   --radius-pill: 9999px;/* PillShape */
 
   /* Springs and timings from Motion.kt */
@@ -114,6 +117,7 @@ body[data-accent="teal"], body:not([data-accent]) {
   --accent-deep: #0E9C8F;
   --accent-ink: #0A4A44;
   --accent-subtle: rgba(63, 207, 192, 0.20);
+  --accent-dark-bright: #5CE0D2;
 }
 
 body[data-accent="coral"] {
@@ -121,6 +125,7 @@ body[data-accent="coral"] {
   --accent-deep: #C24B7E;
   --accent-ink: #5A1D3E;
   --accent-subtle: rgba(238, 111, 163, 0.20);
+  --accent-dark-bright: #F793BC;
 }
 
 body[data-accent="cyan"] {
@@ -163,4 +168,37 @@ body[data-accent="blue"] {
   --accent-deep: #5A8FD8;
   --accent-ink: #0F2344;
   --accent-subtle: rgba(130, 175, 230, 0.20);
+}
+
+/* Accent as used on screen (Theme.kt): the deep cut carries white text on light shells,
+   the bright cut (Teal.darkBright for the signature teal) carries ink text on dark ones. */
+body {
+  --accent-dark-bright: var(--accent-bright);
+}
+
+body[data-accent="teal"],
+body:not([data-accent]) {
+  --accent-dark-bright: #5CE0D2;
+}
+
+body[data-accent="coral"] {
+  --accent-dark-bright: #F793BC;
+}
+
+body[data-theme="light"],
+body[data-theme="day"] {
+  --accent-ui: var(--accent-deep);
+  --on-accent: #FFFFFF;
+  --ring-a: var(--accent-bright);
+  --ring-b: var(--accent-deep);
+}
+
+body[data-theme="dark"],
+body[data-theme="night"],
+body[data-theme="oled"],
+body:not([data-theme]) {
+  --accent-ui: var(--accent-dark-bright);
+  --on-accent: var(--accent-ink);
+  --ring-a: var(--accent-dark-bright);
+  --ring-b: var(--accent-deep);
 }

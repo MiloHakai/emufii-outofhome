@@ -13,6 +13,7 @@ export class TrayBackdrop {
   private stillCanvas: HTMLCanvasElement;
   private stillCtx: CanvasRenderingContext2D;
   private animId: number | null = null;
+  private lastFrame = 0;
   private bakedKey: string = '';
   private width: number = 0;
   private height: number = 0;
@@ -57,6 +58,7 @@ export class TrayBackdrop {
 
     this.stillCanvas.width = this.width;
     this.stillCanvas.height = this.height;
+    this.lastFrame = 0;
 
     this.bakedKey = '';
     this.bakeStillTray();
@@ -213,8 +215,18 @@ export class TrayBackdrop {
     }
   }
 
-  private loop() {
-    this.drawFrame();
+  // The ripples complete a cycle every 19 s, so ~20 fps is visually identical to 60 fps
+  // and keeps a full-window canvas from eating GPU time while the user plays.
+  private loop(now: number = performance.now()) {
+    const reduced =
+      document.body.classList.contains('reduce-motion') || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduced && now - this.lastFrame >= 50) {
+      this.drawFrame();
+      this.lastFrame = now;
+    } else if (reduced && this.lastFrame !== -1) {
+      this.drawFrame();
+      this.lastFrame = -1;
+    }
     this.animId = requestAnimationFrame(this.loop);
   }
 

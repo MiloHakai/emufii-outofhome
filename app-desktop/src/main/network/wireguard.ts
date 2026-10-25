@@ -44,6 +44,11 @@ export class WireGuardManager {
   }
 
   static renderConfig(info: WgTunnelInfo, privateKeyBase64: string, dns?: string | null): string {
+    // Values end up in a wg-quick file, where a stray newline could smuggle in PostUp hooks.
+    const fields = [info.address, info.hairpinAddress, info.subnet, info.relayPublicKey, info.relayEndpoint, info.relayAllowedIps, dns];
+    if (fields.some((v) => v != null && !/^[A-Za-z0-9+/=.:,\-\[\] ]*$/.test(String(v)))) {
+      throw new Error('Invalid tunnel parameters');
+    }
     const addresses = [info.address, info.hairpinAddress].filter(Boolean);
     const prefix = info.subnet.includes('/') ? info.subnet.split('/')[1] : '24';
     const addrLine = addresses.map((a) => `${a}/${prefix}`).join(', ');
@@ -83,7 +88,7 @@ export class WireGuardManager {
     const tunnelDir = path.join(appDataDir, 'tunnels');
     fs.mkdirSync(tunnelDir, { recursive: true });
     const configPath = path.join(tunnelDir, 'emufii0.conf');
-    fs.writeFileSync(configPath, configContent, 'utf8');
+    fs.writeFileSync(configPath, configContent, { encoding: 'utf8', mode: 0o600 });
     this.activeConfigPath = configPath;
 
     let isNativeActive = false;

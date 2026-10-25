@@ -950,15 +950,13 @@ export class EmulatorManager {
 
       this.activeChild = child;
 
-      child.on('exit', () => {
+      const onGone = () => {
+        if (this.activeChild !== child) return;
         this.activeChild = null;
         this.onExitCallback?.();
-      });
-
-      child.on('error', () => {
-        this.activeChild = null;
-        this.onExitCallback?.();
-      });
+      };
+      child.on('exit', onGone);
+      child.on('error', onGone);
 
       return {
         success: true,

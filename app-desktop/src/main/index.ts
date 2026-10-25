@@ -1,10 +1,9 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, Menu, shell, type WebContents } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { Storage } from './library/storage.js';
-import { setupIpc } from './ipc.js';
-import { EmulatorDownloader } from './emulators/downloader.js';
+import { setupIpc, teardownTunnel } from './ipc.js';
 
 let mainWindow: BrowserWindow | null = null;
 let installerWindow: BrowserWindow | null = null;
@@ -62,6 +61,16 @@ function getAppIconPath(): string {
   return assetPng;
 }
 
+function lockDownContents(contents: WebContents) {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  contents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file:')) event.preventDefault();
+  });
+}
+
 function createWindow() {
   const isMac = process.platform === 'darwin';
 
@@ -77,12 +86,13 @@ function createWindow() {
     show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.cjs'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
 
+  lockDownContents(mainWindow.webContents);
   setupIpc(mainWindow, storage);
 
   const indexPath = path.join(__dirname, '../renderer/index.html');
@@ -129,12 +139,13 @@ function createInstallerWindow() {
     show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.cjs'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
 
+  lockDownContents(installerWindow.webContents);
   setupIpc(installerWindow, storage, () => {
     // Transition from installer to main app
     if (installerWindow && !installerWindow.isDestroyed()) {
@@ -156,20 +167,26 @@ function createInstallerWindow() {
   });
 }
 
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+
+app.on('second-instance', () => {
+  const win = mainWindow || installerWindow;
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.focus();
+});
+
 app.whenReady().then(() => {
+  // The default menu's accelerators (Ctrl+R, Ctrl+W...) would reload or close the frameless window.
+  if (app.isPackaged) Menu.setApplicationMenu(null);
   const isInstallerMode = process.argv.includes('--installer') || process.argv.includes('--setup');
 
   if (isInstallerMode) {
     createInstallerWindow();
   } else {
     createWindow();
-
-    // Background check / auto-download of emulators
-    setTimeout(() => {
-      EmulatorDownloader.downloadAll((consoleType, percent, status) => {
-        mainWindow?.webContents.send('emulators:download-progress', { consoleType, percent, status });
-      }).catch(() => {});
-    }, 1000);
   }
 
   app.on('activate', () => {
@@ -178,6 +195,14 @@ app.whenReady().then(() => {
       else createWindow();
     }
   });
+});
+
+let tunnelClosed = false;
+app.on('before-quit', (event) => {
+  if (tunnelClosed) return;
+  event.preventDefault();
+  tunnelClosed = true;
+  teardownTunnel().finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => {

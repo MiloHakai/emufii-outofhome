@@ -3,25 +3,9 @@ import { sfx } from '../sfx.js';
 
 export function renderSplashScreen(container: HTMLElement) {
   container.innerHTML = `
-    <div class="splash-view" style="
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      gap: 32px;
-      text-align: center;
-      cursor: pointer;
-      user-select: none;
-    ">
-      <img src="./assets/logo.png" alt="Emufii" style="
-        width: 168px;
-        height: 168px;
-        object-fit: contain;
-        animation: logo-pulse 2.2s infinite ease-in-out;
-      ">
-      <!-- Signal Pips Loading Animation matching SplashScreen.kt -->
-      <div class="signal-pips" aria-label="Loading...">
+    <div class="splash-view">
+      <img src="./assets/logo.png" alt="Emufii" class="splash-logo" draggable="false">
+      <div class="signal-pips" role="progressbar" aria-label="Loading">
         <span class="signal-pip"></span>
         <span class="signal-pip"></span>
         <span class="signal-pip"></span>
@@ -36,22 +20,13 @@ export function renderSplashScreen(container: HTMLElement) {
     if (hasAdvanced) return;
     hasAdvanced = true;
     sfx.play('confirm');
-    store.navigate('library');
+    // The splash is not a place to come back to.
+    store.set({ currentScreen: 'library', screenHistory: [] });
   };
 
-  // Auto-advance after loading animation completes (matching MIN_MS in app-android SplashScreen.kt)
-  const autoTimer = setTimeout(() => {
-    advance();
-  }, 2600);
-
-  // Clicking anywhere or pressing Enter/Space can also proceed
+  const autoTimer = setTimeout(advance, 1500);
   container.querySelector('.splash-view')?.addEventListener('click', advance);
-
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      advance();
-    }
-  };
+  const onKey = () => advance();
   window.addEventListener('keydown', onKey);
 
   return () => {

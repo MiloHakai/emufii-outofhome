@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 export const api = {
   window: {
@@ -143,6 +143,7 @@ export const api = {
     launchInstalledApp: () => ipcRenderer.invoke('installer:launchInstalledApp'),
   },
   openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
 };
 
 contextBridge.exposeInMainWorld('emufii', api);

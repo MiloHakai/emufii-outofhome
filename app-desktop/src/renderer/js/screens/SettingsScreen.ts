@@ -1,20 +1,18 @@
 import { store } from '../state.js';
 import { sfx } from '../sfx.js';
 import { t, getActiveLanguage } from '../i18n.js';
-import { resolveTheme } from '../components/SettingsModal.js';
+import { esc } from '../html.js';
+import { resolveTheme } from '../theme.js';
 import { ensureEmulator } from '../components/EmulatorDownloadModal.js';
 import { openUpdateModal } from '../components/UpdateModal.js';
 
-export type SettingsHubView = 'hub' | 'general' | 'library' | 'consoles' | 'emulators' | 'appearance' | 'about' | 'crashlogs';
+export type SettingsView = 'general' | 'library' | 'consoles' | 'emulators' | 'appearance' | 'about' | 'crashlogs';
 
-let currentView: SettingsHubView = 'hub';
+let currentView: SettingsView = 'general';
 let selectedTargetDir: string = '';
 
-function getDirBasename(dirPath: string): string {
-  if (!dirPath) return '';
-  const parts = dirPath.split(/[\\/]/).filter(Boolean);
-  return parts.pop() || dirPath;
-}
+// Mirrors EMULATOR_CATALOG in main/emulators/downloader.ts
+const AUTO_DOWNLOADABLE = new Set(['DS', 'GBA', 'PSP', '3DS', 'PS2', 'GameCube', 'Wii']);
 
 export const CONSOLES_LIST = [
   { id: 'Wii', name: 'Nintendo Wii', short: 'Wii', desc: 'RVL • Dolphin (Wiimote & GCPad)' },
@@ -28,7 +26,7 @@ export const CONSOLES_LIST = [
 ];
 
 export function resetSettingsView() {
-  currentView = 'hub';
+  currentView = 'general';
 }
 
 export function renderSettingsScreen(container: HTMLElement) {
@@ -46,203 +44,7 @@ export function renderSettingsScreen(container: HTMLElement) {
     { id: 'blue', name: 'Sky Blue', hex: '#82AFE6' },
   ];
 
-  if (currentView === 'hub') {
-    renderHubView(container, state);
-  } else {
-    renderDetailView(container, currentView, state, accents, emuApi);
-  }
-}
-
-// Hub view
-function renderHubView(container: HTMLElement, state: any) {
-  const hiddenConsoles: string[] = state.settings.hiddenConsoles || [];
-  const visibleConsolesCount = CONSOLES_LIST.length - hiddenConsoles.length;
-  const totalRoms = state.roms.filter((r: any) => !state.settings.hiddenRoms?.includes(r.id)).length;
-  const currentTheme = state.settings.theme || 'dark';
-  const currentAccent = state.settings.accent || 'teal';
-  const themeDisplay = currentTheme.charAt(0).toUpperCase() + currentTheme.slice(1);
-  const accentDisplay = currentAccent.charAt(0).toUpperCase() + currentAccent.slice(1);
-
-  container.innerHTML = `
-    <div class="settings-hub-container">
-      <!-- Top Header -->
-      <div class="settings-hub-header">
-        <button class="settings-round-back-btn" id="btnHubBack" title="${t('back')}">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
-        <h1 class="settings-hub-title">${t('settings_title')}</h1>
-      </div>
-
-      <!-- 2-Column Grid in exact requested order:
-           Row 1: General | Library
-           Row 2: Consoles | Emulators
-           Row 3: Appearance | About
-           Row 4: Crash Logs
-      -->
-      <div class="settings-hub-grid">
-        <!-- 1. General -->
-        <div class="settings-hub-tile" data-hub-page="general" tabindex="0">
-          <div class="settings-hub-tile-left">
-            <div class="settings-hub-icon-wrap">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-            </div>
-            <div class="settings-hub-tile-info">
-              <span class="settings-hub-tile-title">${t('general')}</span>
-              <span class="settings-hub-tile-sub">${t('general_sub')}</span>
-            </div>
-          </div>
-          <div class="settings-hub-tile-right">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity: 0.35;"><polyline points="9 18 15 12 9 6"/></svg>
-          </div>
-        </div>
-
-        <!-- 2. Library -->
-        <div class="settings-hub-tile" data-hub-page="library" tabindex="0">
-          <div class="settings-hub-tile-left">
-            <div class="settings-hub-icon-wrap">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
-            </div>
-            <div class="settings-hub-tile-info">
-              <span class="settings-hub-tile-title">${t('library')}</span>
-              <span class="settings-hub-tile-sub">${t('library_sub')}</span>
-            </div>
-          </div>
-          <div class="settings-hub-tile-right">
-            <span class="tile-status-pill good">${totalRoms} ${totalRoms === 1 ? 'game' : 'games'}</span>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity: 0.35;"><polyline points="9 18 15 12 9 6"/></svg>
-          </div>
-        </div>
-
-        <!-- 3. Consoles -->
-        <div class="settings-hub-tile" data-hub-page="consoles" tabindex="0">
-          <div class="settings-hub-tile-left">
-            <div class="settings-hub-icon-wrap">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="2" y="6" width="20" height="12" rx="4"/><path d="M6 12h4"/><path d="M8 10v4"/><circle cx="17" cy="10" r="1.5" fill="currentColor"/><circle cx="15" cy="13" r="1.5" fill="currentColor"/></svg>
-            </div>
-            <div class="settings-hub-tile-info">
-              <span class="settings-hub-tile-title">${t('consoles')}</span>
-              <span class="settings-hub-tile-sub">${t('consoles_sub', { count: visibleConsolesCount, total: CONSOLES_LIST.length })}</span>
-            </div>
-          </div>
-          <div class="settings-hub-tile-right">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity: 0.35;"><polyline points="9 18 15 12 9 6"/></svg>
-          </div>
-        </div>
-
-        <!-- 4. Emulators -->
-        <div class="settings-hub-tile" data-hub-page="emulators" tabindex="0">
-          <div class="settings-hub-tile-left">
-            <div class="settings-hub-icon-wrap">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 14h3"/><path d="M1 9h3"/><path d="M1 14h3"/></svg>
-            </div>
-            <div class="settings-hub-tile-info">
-              <span class="settings-hub-tile-title">${t('emulators')}</span>
-              <span class="settings-hub-tile-sub">${t('emulators_sub')}</span>
-            </div>
-          </div>
-          <div class="settings-hub-tile-right">
-            <span class="tile-status-pill warn" id="hubEmuPill"><span class="pill-exclamation">!</span> ...</span>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity: 0.35;"><polyline points="9 18 15 12 9 6"/></svg>
-          </div>
-        </div>
-
-        <!-- 5. Appearance -->
-        <div class="settings-hub-tile" data-hub-page="appearance" tabindex="0">
-          <div class="settings-hub-tile-left">
-            <div class="settings-hub-icon-wrap">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
-            </div>
-            <div class="settings-hub-tile-info">
-              <span class="settings-hub-tile-title">${t('appearance')}</span>
-              <span class="settings-hub-tile-sub">${t('appearance_sub', { theme: themeDisplay, accent: accentDisplay })}</span>
-            </div>
-          </div>
-          <div class="settings-hub-tile-right">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity: 0.35;"><polyline points="9 18 15 12 9 6"/></svg>
-          </div>
-        </div>
-
-        <!-- 6. About -->
-        <div class="settings-hub-tile" data-hub-page="about" tabindex="0">
-          <div class="settings-hub-tile-left">
-            <div class="settings-hub-icon-wrap">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-            </div>
-            <div class="settings-hub-tile-info">
-              <span class="settings-hub-tile-title">${t('about')}</span>
-              <span class="settings-hub-tile-sub">${t('about_sub')}</span>
-            </div>
-          </div>
-          <div class="settings-hub-tile-right">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity: 0.35;"><polyline points="9 18 15 12 9 6"/></svg>
-          </div>
-        </div>
-
-        <!-- 7. Crash Logs -->
-        <div class="settings-hub-tile" data-hub-page="crashlogs" tabindex="0">
-          <div class="settings-hub-tile-left">
-            <div class="settings-hub-icon-wrap">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect width="8" height="14" x="8" y="6" rx="4"/><path d="m19 7-3 2"/><path d="m5 7 3 2"/><path d="m19 19-3-2"/><path d="m5 19 3-2"/><path d="M20 13h-4"/><path d="M4 13h4"/><path d="m10 4 1 2"/><path d="m14 4-1 2"/></svg>
-            </div>
-            <div class="settings-hub-tile-info">
-              <span class="settings-hub-tile-title">${t('crash_logs')}</span>
-              <span class="settings-hub-tile-sub">${t('crash_logs_sub')}</span>
-            </div>
-          </div>
-          <div class="settings-hub-tile-right">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="opacity: 0.35;"><polyline points="9 18 15 12 9 6"/></svg>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  // Dynamically query installed emulators count for the Hub tile pill
-  const emuApi = (window as any).emufii;
-  if (emuApi?.emulators?.detectAll) {
-    emuApi.emulators.detectAll().then((all: any) => {
-      const emus = Object.values(all || {}) as any[];
-      const installed = emus.filter((e) => e.isInstalled).length;
-      const total = emus.length;
-      const pill = container.querySelector('#hubEmuPill');
-      if (pill) {
-        if (installed === total && total > 0) {
-          pill.className = 'tile-status-pill good';
-          pill.innerHTML = `✓ ${installed} / ${total}`;
-        } else {
-          pill.className = 'tile-status-pill warn';
-          pill.innerHTML = `<span class="pill-exclamation">!</span> ${installed} / ${total}`;
-        }
-      }
-    }).catch(() => {});
-  }
-
-  // Attach navigation
-  container.querySelectorAll<HTMLElement>('.settings-hub-tile').forEach((tile) => {
-    tile.addEventListener('click', (e) => {
-      sfx.play('click');
-      const page = (e.currentTarget as HTMLElement).dataset.hubPage as SettingsHubView;
-      if (page) {
-        currentView = page;
-        renderSettingsScreen(container);
-      }
-    });
-
-    // Enter / Space to open
-    tile.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        tile.click();
-      }
-    });
-  });
-
-  const goBack = () => {
-    sfx.play('click');
-    store.goBack();
-  };
-
-  container.querySelector('#btnHubBack')?.addEventListener('click', goBack);
+  renderSettingsLayout(container, currentView, state, accents, emuApi);
 }
 
 export function updateSegmentedGlider(segEl: HTMLElement, animate: boolean = true) {
@@ -311,51 +113,132 @@ export function setupAllSegmentedGliders(container: HTMLElement) {
   }
 }
 
-// Detail view (opens when clicking any Hub tile)
-function renderDetailView(
+const SETTINGS_NAV: { view: SettingsView; label: string; icon: string }[] = [
+  {
+    view: 'general',
+    label: 'general',
+    icon: '<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>',
+  },
+  {
+    view: 'library',
+    label: 'library',
+    icon: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/>',
+  },
+  {
+    view: 'consoles',
+    label: 'consoles',
+    icon: '<rect x="2" y="6" width="20" height="12" rx="4"/><path d="M6 12h4"/><path d="M8 10v4"/><circle cx="17" cy="10" r="1.5" fill="currentColor"/><circle cx="15" cy="13" r="1.5" fill="currentColor"/>',
+  },
+  {
+    view: 'emulators',
+    label: 'emulators',
+    icon: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 14h3"/><path d="M1 9h3"/><path d="M1 14h3"/>',
+  },
+  {
+    view: 'appearance',
+    label: 'appearance',
+    icon: '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>',
+  },
+  {
+    view: 'about',
+    label: 'about',
+    icon: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+  },
+  {
+    view: 'crashlogs',
+    label: 'crash_logs',
+    icon: '<rect width="8" height="14" x="8" y="6" rx="4"/><path d="m19 7-3 2"/><path d="m5 7 3 2"/><path d="m19 19-3-2"/><path d="m5 19 3-2"/><path d="M20 13h-4"/><path d="M4 13h4"/><path d="m10 4 1 2"/><path d="m14 4-1 2"/>',
+  },
+];
+
+function renderSettingsLayout(
   container: HTMLElement,
-  view: SettingsHubView,
+  view: SettingsView,
   state: any,
   accents: any[],
   emuApi: any
 ) {
-  const titles: Record<SettingsHubView, string> = {
-    hub: t('settings_title'),
-    general: t('general'),
-    library: t('library'),
-    consoles: t('consoles'),
-    emulators: t('emulators'),
-    appearance: t('appearance'),
-    about: t('about'),
-    crashlogs: t('crash_logs'),
-  };
+  const scrollTop = container.querySelector('#settingsDetailBody')?.scrollTop ?? 0;
+  const sameView = container.querySelector<HTMLElement>('.settings-layout')?.dataset.view === view;
+  const navItem = SETTINGS_NAV.find((n) => n.view === view) || SETTINGS_NAV[0];
 
   container.innerHTML = `
-    <div class="settings-hub-container">
-      <!-- Detail Top Header with Back to Hub -->
-      <div class="settings-hub-header">
-        <button class="settings-round-back-btn" id="btnDetailBack" title="${t('back')}">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
-        <h1 class="settings-hub-title">${titles[view] || t('settings_title')}</h1>
-      </div>
-
-      <!-- Detail Page Content Body -->
-      <div id="settingsDetailBody">
+    <div class="settings-layout" data-view="${view}">
+      <aside class="settings-sidebar">
+        <div class="settings-sidebar-header">
+          <button class="settings-round-back-btn" id="btnSettingsBack" title="${t('back')} (Esc)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <h1 class="settings-sidebar-title">${t('settings_title')}</h1>
+        </div>
+        <nav class="settings-nav" role="tablist" aria-orientation="vertical">
+          ${SETTINGS_NAV.map(
+            (n) => `
+            <button class="settings-nav-item ${n.view === view ? 'active' : ''}" data-settings-view="${n.view}" role="tab" aria-selected="${n.view === view}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">${n.icon}</svg>
+              <span>${t(n.label)}</span>
+              ${n.view === 'emulators' ? '<span class="settings-nav-badge" id="navEmuBadge" hidden></span>' : ''}
+            </button>
+          `
+          ).join('')}
+        </nav>
+      </aside>
+      <main class="settings-content" id="settingsDetailBody" role="tabpanel">
+        <h2 class="settings-page-title">${t(navItem.label)}</h2>
         ${renderDetailBody(view, state, accents)}
-      </div>
+      </main>
     </div>
   `;
 
-  const returnToHub = () => {
+  const body = container.querySelector<HTMLElement>('#settingsDetailBody');
+  if (body && sameView) body.scrollTop = scrollTop;
+
+  container.querySelectorAll<HTMLElement>('.settings-nav-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      const next = item.dataset.settingsView as SettingsView;
+      if (!next || next === currentView) return;
+      sfx.play('click');
+      currentView = next;
+      renderSettingsScreen(container);
+      if (document.body.dataset.input !== 'mouse') {
+        container.querySelector<HTMLElement>(`.settings-nav-item[data-settings-view="${next}"]`)?.focus({ preventScroll: true });
+      }
+    });
+  });
+
+  container.querySelector('.settings-nav')?.addEventListener('keydown', (e) => {
+    const ev = e as KeyboardEvent;
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const idx = SETTINGS_NAV.findIndex((n) => n.view === currentView);
+    const nextIdx = (idx + (ev.key === 'ArrowDown' ? 1 : -1) + SETTINGS_NAV.length) % SETTINGS_NAV.length;
+    container
+      .querySelector<HTMLElement>(`.settings-nav-item[data-settings-view="${SETTINGS_NAV[nextIdx].view}"]`)
+      ?.click();
+  });
+
+  container.querySelector('#btnSettingsBack')?.addEventListener('click', () => {
     sfx.play('click');
-    currentView = 'hub';
-    renderSettingsScreen(container);
-  };
+    store.goBack();
+  });
 
-  container.querySelector('#btnDetailBack')?.addEventListener('click', returnToHub);
+  if (emuApi?.emulators?.detectAll) {
+    emuApi.emulators
+      .detectAll()
+      .then((all: any) => {
+        const emus = Object.values(all || {}) as any[];
+        const installed = emus.filter((e) => e.isInstalled).length;
+        const badge = container.querySelector<HTMLElement>('#navEmuBadge');
+        if (badge && emus.length > 0) {
+          badge.hidden = false;
+          badge.textContent = `${installed}/${emus.length}`;
+          badge.classList.toggle('warn', installed < emus.length);
+        }
+      })
+      .catch(() => {});
+  }
 
-  // Attach detail listeners
   attachDetailListeners(view, container, state, emuApi);
   requestAnimationFrame(() => {
     setupAllSegmentedGliders(container);
@@ -363,7 +246,7 @@ function renderDetailView(
   });
 }
 
-function renderDetailBody(view: SettingsHubView, state: any, accents: any[]): string {
+function renderDetailBody(view: SettingsView, state: any, accents: any[]): string {
   switch (view) {
     case 'general':
       return renderGeneralPage(state);
@@ -479,7 +362,6 @@ function renderLibraryPage(state: any): string {
     selectedTargetDir = dirs[0] || '';
   }
 
-  const targetBasename = getDirBasename(selectedTargetDir) || 'Directory';
 
   return `
     <!-- 1. Game Directories Header with Action Buttons -->
@@ -514,7 +396,7 @@ function renderLibraryPage(state: any): string {
                   const isTarget = dir === selectedTargetDir;
                   return `
                     <div class="path-clean-row ${isTarget ? 'target-active' : ''}" style="padding: 8px 14px;">
-                      <div class="btnSelectTargetDir" data-dir="${dir}" style="display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1; cursor: pointer;" title="${t('set_as_target')}">
+                      <div class="btnSelectTargetDir" data-dir="${esc(dir)}" style="display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1; cursor: pointer;" title="${t('set_as_target')}">
                         <div class="target-radio-indicator ${isTarget ? 'active' : ''}">
                           ${isTarget ? '<div class="target-radio-dot"></div>' : ''}
                         </div>
@@ -528,19 +410,19 @@ function renderLibraryPage(state: any): string {
                             ? `<span class="badge" style="font-size: 9px; font-weight: 800; background: var(--accent-bright); color: var(--accent-ink);">${t('selected_target')}</span>`
                             : ''
                         }
-                        <span style="font-family: var(--font-family); font-size: 12px; color: var(--ink-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${dir}">${dir}</span>
+                        <span style="font-family: var(--font-family); font-size: 12px; color: var(--ink-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${esc(dir)}">${esc(dir)}</span>
                       </div>
                       <div style="display: flex; align-items: center; gap: 5px; flex-shrink: 0;">
-                        <button class="btnPathAddRom plate-button" data-dir="${dir}" style="height: 24px; padding: 0 8px; font-size: 10.5px; font-weight: 700; border-radius: 9999px; background: rgba(255, 255, 255, 0.06); color: var(--ink-primary); display: inline-flex; align-items: center; gap: 3px;" title="${t('add_roms')}">
+                        <button class="btnPathAddRom plate-button" data-dir="${esc(dir)}" style="height: 24px; padding: 0 8px; font-size: 10.5px; font-weight: 700; border-radius: 9999px; background: rgba(255, 255, 255, 0.06); color: var(--ink-primary); display: inline-flex; align-items: center; gap: 3px;" title="${t('add_roms')}">
                           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                           ROM
                         </button>
-                        <button class="btnPathOpenFolder plate-button" data-dir="${dir}" style="height: 24px; width: 24px; border-radius: 50%; background: rgba(255, 255, 255, 0.06); color: var(--ink-secondary); display: inline-flex; align-items: center; justify-content: center;" title="${t('open_folder')}">
+                        <button class="btnPathOpenFolder plate-button" data-dir="${esc(dir)}" style="height: 24px; width: 24px; border-radius: 50%; background: rgba(255, 255, 255, 0.06); color: var(--ink-secondary); display: inline-flex; align-items: center; justify-content: center;" title="${t('open_folder')}">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
                         </button>
                         ${
                           !isSpecial
-                            ? `<button class="btnRemoveDir" data-dir="${dir}" style="background: transparent; border: none; cursor: pointer; color: var(--compat-broken); font-size: 16px; padding: 0 4px; line-height: 1;" title="${t('remove')}">&times;</button>`
+                            ? `<button class="btnRemoveDir" data-dir="${esc(dir)}" style="background: transparent; border: none; cursor: pointer; color: var(--compat-broken); font-size: 16px; padding: 0 4px; line-height: 1;" title="${t('remove')}">&times;</button>`
                             : ''
                         }
                       </div>
@@ -873,7 +755,7 @@ function renderCrashLogsPage(): string {
 }
 
 // Detail listeners
-function attachDetailListeners(view: SettingsHubView, container: HTMLElement, state: any, emuApi: any) {
+function attachDetailListeners(view: SettingsView, container: HTMLElement, state: any, emuApi: any) {
   if (view === 'general') {
     // Language
     container.querySelectorAll('[data-lang-val]').forEach((btn) => {
@@ -889,7 +771,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
         }
         const val = target.dataset.langVal as any;
         await emuApi.config.updateSettings({ language: val });
-        store.set({ settings: { ...state.settings, language: val } });
+        store.set({ settings: { ...store.get().settings, language: val } });
         // Let vibrant glider pill slide smoothly before re-rendering view with new language strings
         setTimeout(() => {
           renderSettingsScreen(container);
@@ -901,7 +783,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
     container.querySelector('#chkNotifyFriends')?.addEventListener('change', async (e) => {
       const checked = (e.target as HTMLInputElement).checked;
       await emuApi.config.updateSettings({ notifyFriends: checked });
-      store.set({ settings: { ...state.settings, notifyFriends: checked } });
+      store.set({ settings: { ...store.get().settings, notifyFriends: checked } });
       sfx.play('toggle');
     });
 
@@ -911,7 +793,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
       const input = container.querySelector('#inputCoordinatorUrl') as HTMLInputElement;
       const url = input?.value.trim() || 'https://coord.emufii.xyz';
       await emuApi.config.updateSettings({ coordinatorUrl: url });
-      store.set({ settings: { ...state.settings, coordinatorUrl: url } });
+      store.set({ settings: { ...store.get().settings, coordinatorUrl: url } });
       sfx.play('confirm');
       const origText = btn.textContent;
       btn.textContent = '✓ ' + t('save');
@@ -1025,12 +907,12 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
     container.querySelector('#btnSettingsAddDir')?.addEventListener('click', async () => {
       sfx.play('click');
       const selected = await emuApi.dialog.selectDirectory();
-      if (selected && !state.settings.romDirectories.includes(selected)) {
-        const dirs = [...state.settings.romDirectories, selected];
+      if (selected && !store.get().settings.romDirectories.includes(selected)) {
+        const dirs = [...store.get().settings.romDirectories, selected];
         await emuApi.config.updateSettings({ romDirectories: dirs });
         selectedTargetDir = selected;
         const scanned = await emuApi.library.scan();
-        store.set({ roms: scanned, settings: { ...state.settings, romDirectories: dirs } });
+        store.set({ roms: scanned, settings: { ...store.get().settings, romDirectories: dirs } });
         renderSettingsScreen(container);
       }
     });
@@ -1040,10 +922,10 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
       btn.addEventListener('click', async (e) => {
         sfx.play('click');
         const dir = (e.currentTarget as HTMLElement).dataset.dir;
-        const dirs = state.settings.romDirectories.filter((d: string) => d !== dir);
+        const dirs = store.get().settings.romDirectories.filter((d: string) => d !== dir);
         await emuApi.config.updateSettings({ romDirectories: dirs });
         const scanned = await emuApi.library.scan();
-        store.set({ roms: scanned, settings: { ...state.settings, romDirectories: dirs } });
+        store.set({ roms: scanned, settings: { ...store.get().settings, romDirectories: dirs } });
         renderSettingsScreen(container);
       });
     });
@@ -1100,7 +982,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
       btn.textContent = '✓ ' + t('restore_hidden');
       btn.disabled = true;
       await emuApi.config.restoreHiddenRoms();
-      store.set({ settings: { ...state.settings, hiddenRoms: [] } });
+      store.set({ settings: { ...store.get().settings, hiddenRoms: [] } });
       setTimeout(() => {
         renderSettingsScreen(container);
       }, 600);
@@ -1110,7 +992,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
     container.querySelector('#chkHideIncompatible')?.addEventListener('change', async (e) => {
       const checked = (e.target as HTMLInputElement).checked;
       await emuApi.config.updateSettings({ hideIncompatible: checked });
-      store.set({ settings: { ...state.settings, hideIncompatible: checked } });
+      store.set({ settings: { ...store.get().settings, hideIncompatible: checked } });
       sfx.play('toggle');
     });
 
@@ -1128,7 +1010,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
         }
         const val = target.dataset.layoutVal as any;
         await emuApi.config.updateSettings({ libraryLayout: val });
-        store.set({ settings: { ...state.settings, libraryLayout: val } });
+        store.set({ settings: { ...store.get().settings, libraryLayout: val } });
       });
     });
 
@@ -1146,7 +1028,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
         }
         const val = target.dataset.sortVal as any;
         await emuApi.config.updateSettings({ librarySort: val });
-        store.set({ settings: { ...state.settings, librarySort: val } });
+        store.set({ settings: { ...store.get().settings, librarySort: val } });
       });
     });
   } else if (view === 'consoles') {
@@ -1160,7 +1042,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
 
         const isVisible = target.checked;
         const hiddenList = await emuApi.config.setConsoleVisible(consoleId, isVisible);
-        store.set({ settings: { ...state.settings, hiddenConsoles: hiddenList } });
+        store.set({ settings: { ...store.get().settings, hiddenConsoles: hiddenList } });
       });
     });
   } else if (view === 'emulators') {
@@ -1171,9 +1053,9 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
         const emuListEl = container.querySelector('#emulatorsListContainer');
         if (!emuListEl) return;
 
-        const emus = Object.values(detectedEmulators) as any[];
+        const emus = Object.entries(detectedEmulators) as [string, any][];
         emuListEl.innerHTML = emus
-          .map((emu) => {
+          .map(([consoleId, emu]) => {
             const isInstalled = emu.isInstalled;
             const pathLower = (emu.executablePath || '').toLowerCase();
             const isManaged = pathLower.includes('emufii/emulators') || pathLower.includes('emufii\\emulators');
@@ -1182,7 +1064,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
                 <div class="emulator-clean-info">
                   <div class="emulator-clean-title-row">
                     <strong class="emulator-clean-name">${emu.name}</strong>
-                    <span class="badge" style="font-size: 10px; font-weight: 800; background: var(--plate-bg); padding: 2px 8px; border-radius: 9999px;">${emu.console}</span>
+                    <span class="badge" style="font-size: 10px; font-weight: 800; background: var(--plate-bg); padding: 2px 8px; border-radius: 9999px;">${esc(consoleId)}</span>
                     <span class="badge" style="font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 9999px; background: ${
                       isInstalled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)'
                     }; color: ${isInstalled ? '#10b981' : '#ef4444'};">
@@ -1190,16 +1072,16 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
                     </span>
                   </div>
                   <div class="emulator-clean-path">
-                    ${emu.executablePath || 'Auto-Download Ready (Windows & Linux)'}
+                    ${esc(emu.executablePath || 'Auto-Download Ready (Windows & Linux)')}
                   </div>
                 </div>
                 <div class="emulator-clean-actions">
-                  <button class="btn-secondary plate-button btnSelectEmuPath" data-console="${emu.console}" data-name="${emu.name}">
+                  <button class="btn-secondary plate-button btnSelectEmuPath" data-console="${esc(consoleId)}" data-name="${esc(emu.name)}">
                     ${t('browse_binary')}
                   </button>
                   ${
-                    !isInstalled
-                      ? `<button class="btn-primary plate-button btnDownloadEmu" data-console="${emu.console}">
+                    !isInstalled && AUTO_DOWNLOADABLE.has(consoleId)
+                      ? `<button class="btn-primary plate-button btnDownloadEmu" data-console="${esc(consoleId)}">
                           ${t('download_btn')}
                         </button>`
                       : ''
@@ -1214,12 +1096,16 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
         emuListEl.querySelectorAll('.btnSelectEmuPath').forEach((btn) => {
           btn.addEventListener('click', async (e) => {
             sfx.play('click');
-            const targetName = (e.currentTarget as HTMLElement).dataset.name || 'Emulator';
+            const { name: targetName = 'Emulator', console: consoleId } = (e.currentTarget as HTMLElement).dataset;
+            if (!consoleId) return;
             const selected = await emuApi.dialog.selectExecutable(targetName);
             if (selected) {
-              const customPaths = { ...state.settings.customEmulatorPaths, [targetName]: selected };
+              // Dolphin serves both GameCube and Wii.
+              const keys = consoleId === 'GameCube' || consoleId === 'Wii' ? ['GameCube', 'Wii'] : [consoleId];
+              const customPaths = { ...store.get().settings.customEmulatorPaths };
+              for (const key of keys) customPaths[key] = selected;
               await emuApi.config.updateSettings({ customEmulatorPaths: customPaths });
-              store.set({ settings: { ...state.settings, customEmulatorPaths: customPaths } });
+              store.set({ settings: { ...store.get().settings, customEmulatorPaths: customPaths } });
               loadEmulators();
             }
           });
@@ -1276,7 +1162,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
         }
         const val = target.dataset.themeVal as any;
         await emuApi.config.updateSettings({ theme: val });
-        store.set({ settings: { ...state.settings, theme: val } });
+        store.set({ settings: { ...store.get().settings, theme: val } });
         document.body.dataset.theme = resolveTheme(val);
       });
     });
@@ -1294,7 +1180,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
         }
         const val = target.dataset.accentVal as any;
         await emuApi.config.updateSettings({ accent: val });
-        store.set({ settings: { ...state.settings, accent: val } });
+        store.set({ settings: { ...store.get().settings, accent: val } });
         document.body.dataset.accent = val;
         setupAllSegmentedGliders(container);
       });
@@ -1305,14 +1191,14 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
       const checked = (e.target as HTMLInputElement).checked;
       await emuApi.config.updateSettings({ soundEffects: checked });
       sfx.setEnabled(checked);
-      store.set({ settings: { ...state.settings, soundEffects: checked } });
+      store.set({ settings: { ...store.get().settings, soundEffects: checked } });
     });
 
     // Animations
     container.querySelector('#chkAnimations')?.addEventListener('change', async (e) => {
       const checked = (e.target as HTMLInputElement).checked;
       await emuApi.config.updateSettings({ animations: checked });
-      store.set({ settings: { ...state.settings, animations: checked } });
+      store.set({ settings: { ...store.get().settings, animations: checked } });
     });
   } else if (view === 'about') {
     container.querySelector('#chkAutoDownloadUpdates')?.addEventListener('change', async (e) => {
@@ -1401,7 +1287,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
     });
     container.querySelector('#btnOpenGithub')?.addEventListener('click', () => {
       sfx.play('click');
-      const url = 'https://github.com/emufii';
+      const url = 'https://github.com/jojodogm-ctrl/emufii';
       if (emuApi?.openExternal) {
         emuApi.openExternal(url);
       } else {
@@ -1426,10 +1312,10 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
               (log: any, idx: number) => `
               <div class="plate" style="padding: 12px 14px; border-radius: 14px; background: var(--plate-bg-low);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                  <strong style="font-size: 12px; font-family: monospace; color: var(--ink-primary);">${log.name}</strong>
+                  <strong style="font-size: 12px; font-family: monospace; color: var(--ink-primary);">${esc(log.name)}</strong>
                   <button class="btn-secondary plate-button btnCopyCrashLog" data-idx="${idx}" style="height: 24px; padding: 0 10px; font-size: 10px; border-radius: 9999px;">Copy</button>
                 </div>
-                <pre style="margin: 0; font-size: 11px; color: var(--ink-secondary); white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto;">${String(log.content || '').replace(/</g, '&lt;')}</pre>
+                <pre style="margin: 0; font-size: 11px; color: var(--ink-secondary); white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto;">${esc(log.content)}</pre>
               </div>
             `
             )
@@ -1459,7 +1345,7 @@ function attachDetailListeners(view: SettingsHubView, container: HTMLElement, st
 
     container.querySelector('#btnReportIssue')?.addEventListener('click', () => {
       sfx.play('click');
-      const url = 'https://github.com/emufii/emufii/issues';
+      const url = 'https://github.com/jojodogm-ctrl/emufii/issues';
       if (emuApi?.openExternal) {
         emuApi.openExternal(url);
       } else {

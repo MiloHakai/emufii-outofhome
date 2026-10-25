@@ -2,81 +2,66 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: https:; font-src 'self' data:; media-src 'self' data: blob: file:; connect-src 'self' file: data:; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Emufii - Play your emulators online with friends, using a six-character code.">
   <title>Emufii</title>
   <link rel="stylesheet" href="./css/fonts.css">
   <link rel="stylesheet" href="./css/theme.css">
   <link rel="stylesheet" href="./css/motion.css">
   <link rel="stylesheet" href="./css/app.css">
 </head>
-<body data-theme="dark" data-accent="teal">
-  <!-- Dynamic Tray Backdrop Canvas (animated waves from TrayBackdrop.kt) -->
-  <canvas id="trayBackdropCanvas" class="tray-backdrop"></canvas>
+<body data-theme="dark" data-accent="teal" data-input="mouse">
+  <canvas id="trayBackdropCanvas" class="tray-backdrop" aria-hidden="true"></canvas>
 
-  <!-- Frameless Titlebar -->
   <header class="titlebar" id="appTitlebar">
     <div class="titlebar-brand">
-      <img src="./assets/logo.png" alt="Emufii Logo">
+      <img src="./assets/logo.png" alt="" draggable="false">
       <span>Emufii</span>
     </div>
     <div class="titlebar-controls" id="windowControls">
-      <button class="window-btn" id="btnWinMinimize" title="Minimize">
+      <button class="window-btn" id="btnWinMinimize" title="Minimize" aria-label="Minimize" tabindex="-1">
         <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor"><rect width="10" height="1"/></svg>
       </button>
-      <button class="window-btn" id="btnWinMaximize" title="Maximize">
+      <button class="window-btn" id="btnWinMaximize" title="Maximize" aria-label="Maximize" tabindex="-1">
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1"><rect x="0.5" y="0.5" width="9" height="9"/></svg>
       </button>
-      <button class="window-btn close" id="btnWinClose" title="Close">
+      <button class="window-btn close" id="btnWinClose" title="Close" aria-label="Close" tabindex="-1">
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
       </button>
     </div>
   </header>
 
-  <!-- Main App Scaffold -->
   <div class="app-scaffold">
-    <!-- Header Status Band (Handheld Menu Console Inset) -->
-    <nav class="header-band" id="appHeaderBand">
+    <nav class="header-band" id="appHeaderBand" hidden>
       <div class="header-left" id="headerLeftArea">
-        <!-- Clickable Profile Avatar (Circular only, no rectangular box) -->
-        <button class="header-avatar-btn" id="headerProfileBtn" title="Player Profile">
-          <div class="chip-avatar" id="headerProfileAvatar">J</div>
+        <button class="header-avatar-btn" id="headerProfileBtn" title="Your profile" aria-label="Your profile" aria-haspopup="dialog">
+          <span class="chip-avatar" id="headerProfileAvatar">J</span>
+          <span class="user-status-dot online" id="headerStatusDot"></span>
         </button>
-        <span class="user-status-dot online" id="headerStatusDot" title="Presence Status"></span>
 
-        <!-- Header Status Block (matching Android FloatingTopBar) -->
         <div class="header-status-block" id="headerStatusBlock">
-          <div class="header-subtitle" id="headerSubtitle">No friends online</div>
+          <div class="header-subtitle" id="headerSubtitle"></div>
           <div class="header-title-row">
             <span class="header-title" id="headerTitle">Library</span>
-            <span class="header-count" id="headerCount">1 game</span>
+            <span class="header-count" id="headerCount"></span>
           </div>
         </div>
-
-        <!-- Back to Library Folder Breadcrumb (matching Android FolderHeader) -->
-        <button class="folder-back-pill" id="headerFolderBackBtn" style="display: none;" title="Back to Library">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
-          <span>Library</span>
-        </button>
       </div>
 
       <div class="header-right">
-        <!-- Emufii Server Status Chip (moved to the left of Friends) -->
-        <button class="server-status-pill plate-button" id="vpsStatusChip" title="Emufii Coordinator Server">
+        <button class="server-status-pill plate-button" id="vpsStatusChip" title="Emufii coordinator" aria-haspopup="dialog">
           <span class="lamp" id="vpsLamp"></span>
-          <div class="server-status-text">
-            <div class="server-name">Emufii server</div>
-            <div class="server-sub" id="vpsText">Online &bull; US East (NY)</div>
-          </div>
+          <span class="server-status-text">
+            <span class="server-name">Emufii server</span>
+            <span class="server-sub" id="vpsText">Connecting…</span>
+          </span>
         </button>
 
-        <!-- Friends Chip (Icon-only chip matching app-android) -->
-        <button class="icon-btn plate-button" id="headerFriendsBtn" title="Friends List">
+        <button class="icon-btn plate-button" id="headerFriendsBtn" title="Friends (Ctrl+Shift+F)" aria-label="Friends" aria-haspopup="dialog">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         </button>
 
-        <!-- Open Sessions Finder (Icon-only chip matching app-android SessionsChip) -->
-        <button class="chip plate-button icon-chip" id="headerFinderBtn" title="Open Sessions">
+        <button class="chip plate-button icon-chip" id="headerFinderBtn" title="Open sessions (Ctrl+O) · Join with a code (Ctrl+J)" aria-label="Open sessions" aria-haspopup="dialog">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" class="sessions-icon">
             <rect x="2" y="3" width="9.5" height="7.5" rx="2" stroke="currentColor" stroke-width="2" fill="none" />
             <rect x="12.5" y="13.5" width="9.5" height="7.5" rx="2" stroke="currentColor" stroke-width="2" fill="none" />
@@ -84,154 +69,31 @@
           </svg>
         </button>
 
-        <!-- Settings Gear (clean circular icon button) -->
-        <button class="icon-btn plate-button" id="headerSettingsBtn" title="Settings">
+        <button class="icon-btn plate-button" id="headerSettingsBtn" title="Settings (Ctrl+,)" aria-label="Settings">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
     </nav>
 
-    <!-- Floating Panel Backdrop (click-outside catcher) -->
     <div id="floatingPanelBackdrop" class="floating-panel-backdrop"></div>
+    <div id="floatingCloudPanel" class="floating-cloud-panel" aria-hidden="true" inert></div>
 
-    <!-- Floating Cloud Panel (Sessions, Join, Friends, Profile) -->
-    <div id="floatingCloudPanel" class="floating-cloud-panel" aria-hidden="true"></div>
-
-    <!-- Dynamic Screen Host -->
-    <div class="screen-container" id="screenHost">
+    <main class="screen-container" id="screenHost">
       <div class="screen" id="currentScreenView"></div>
-    </div>
+    </main>
   </div>
 
-  <!-- Reusable FactSheet Modal -->
-  <dialog id="factSheetDialog" closedby="any">
+  <dialog id="factSheetDialog">
     <div class="dialog-content"></div>
   </dialog>
 
-  <!-- Profile Cloud Modal -->
-  <dialog id="profileModal" class="cloud-modal" closedby="any">
-    <div class="dialog-content"></div>
-  </dialog>
-
-  <!-- Settings Cloud Modal -->
-  <dialog id="settingsModal" class="cloud-modal" closedby="any">
-    <div class="dialog-content"></div>
-  </dialog>
-
-  <!-- Join Session Cloud Modal -->
-  <dialog id="joinModal" class="cloud-modal" closedby="any">
-    <div class="dialog-content"></div>
-  </dialog>
-
-  <!-- Friends Cloud Modal -->
-  <dialog id="friendsModal" class="cloud-modal" closedby="any">
-    <div class="dialog-content"></div>
-  </dialog>
-
-  <!-- Browser preview fallback mock (inert in Electron) -->
-  <script>
-    if (!window.emufii) {
-      window.emufii = {
-        window: {
-          minimize: () => {},
-          maximize: () => {},
-          close: () => {},
-          isMaximized: () => false,
-        },
-        config: {
-          get: async () => ({
-            profile: { id: '0123456789AZ', name: 'Joueur', avatarDataUrl: null },
-            settings: {
-              romDirectories: ['/home/noobiez16/ROMs/PSP', '/home/noobiez16/ROMs/PS2'],
-              theme: 'dark',
-              accent: 'cyan',
-              animations: true,
-              soundEffects: true,
-              libraryLayout: 'grid',
-              librarySort: 'az',
-              coordinatorUrl: 'https://coord.emufii.xyz',
-              customEmulatorPaths: {},
-              hiddenRoms: [],
-              customTitles: {},
-              friends: ['ABC123XYZ456', '789JKL012MNO'],
-              friendNicknames: { 'ABC123XYZ456': 'Alex', '789JKL012MNO': 'Lucas' },
-            },
-          }),
-          updateProfile: async (p) => p,
-          updateSettings: async (s) => s,
-          addFriend: async () => {},
-          removeFriend: async () => {},
-          renameRom: async () => {},
-          toggleHideRom: async () => {},
-        },
-        dialog: {
-          selectDirectory: async () => '/home/noobiez16/ROMs/Switch',
-          selectExecutable: async () => '/usr/bin/ppsspp',
-          selectAvatar: async () => null,
-        },
-        library: {
-          scan: async () => [
-            { id: '1', filePath: '/home/noobiez16/ROMs/PSP/Castlevania_Dracula_X.chd', fileName: 'Castlevania_Dracula_X.chd', displayName: 'Castlevania: Dracula X Chronicles', console: 'PSP', titleId: 'ULUS10277', productCode: 'ULUS10277', fileSizeBytes: 840000000, addedAt: Date.now() - 3600000, compatRating: 'perfect' },
-            { id: '2', filePath: '/home/noobiez16/ROMs/PS2/Midnight_Club_3_DUB.iso', fileName: 'Midnight_Club_3_DUB.iso', displayName: 'Midnight Club 3: DUB Edition Remix', console: 'PS2', titleId: 'SLUS21355', productCode: 'SLUS21355', ps2ElfCrc: '81C7E05F', fileSizeBytes: 4200000000, addedAt: Date.now() - 7200000, compatRating: 'perfect' },
-            { id: '3', filePath: '/home/noobiez16/ROMs/3DS/Mario_Kart_7.3ds', fileName: 'Mario_Kart_7.3ds', displayName: 'Mario Kart 7', console: '3DS', titleId: '0004000000030800', productCode: 'CTR-P-AMKE', fileSizeBytes: 650000000, addedAt: Date.now() - 14400000, compatRating: 'perfect' },
-            { id: '4', filePath: '/home/noobiez16/ROMs/GameCube/Super_Smash_Bros_Melee.iso', fileName: 'Super_Smash_Bros_Melee.iso', displayName: 'Super Smash Bros. Melee', console: 'GameCube', titleId: 'GALE01', productCode: 'GALE01', fileSizeBytes: 1400000000, addedAt: Date.now() - 28800000, compatRating: 'perfect' },
-            { id: '5', filePath: '/home/noobiez16/ROMs/DS/Mario_Kart_DS.nds', fileName: 'Mario_Kart_DS.nds', displayName: 'Mario Kart DS', console: 'DS', titleId: 'AMCE', productCode: 'AMCE', fileSizeBytes: 33554432, addedAt: Date.now() - 57600000, compatRating: 'perfect' },
-            { id: '6', filePath: '/home/noobiez16/ROMs/Switch/Super_Mario_Wonder.nsp', fileName: 'Super_Mario_Wonder.nsp', displayName: 'Super Mario Bros. Wonder', console: 'Switch', titleId: '010015100B514000', fileSizeBytes: 3600000000, addedAt: Date.now() - 86400000, compatRating: 'perfect' },
-            { id: '7', filePath: '/home/noobiez16/ROMs/Wii/Mario_Kart_Wii.rvz', fileName: 'Mario_Kart_Wii.rvz', displayName: 'Mario Kart Wii', console: 'Wii', titleId: 'RMCE01', productCode: 'RMCE01', fileSizeBytes: 2700000000, addedAt: Date.now() - 115200000, compatRating: 'perfect' },
-          ],
-          fetchCompat: async () => ({ games: [] }),
-          fetchMeta: async () => ({ games: [] }),
-        },
-        coordinator: {
-          createSession: async (p) => ({ code: p.code, subnet: '10.67.12.0/24', token: 'mock-token' }),
-          patchSession: async () => {},
-          setHostReady: async () => {},
-          getSession: async (code) => ({ code, subnet: '10.67.12.0/24', hostIp: '10.67.12.2', port: 24872, hostReady: true, members: [{ id: '0123456789AZ', name: 'Joueur', forSeconds: 45 }] }),
-          listRelays: async () => [{ id: 'eu-west', name: 'Europe (Frankfurt)', pingHost: 'relay.emufii.xyz' }],
-          listSessions: async () => [
-            { code: 'MK7WIN', romTitle: 'Mario Kart 7', hostName: 'Brian', players: 3, ready: true, ageSeconds: 180 },
-            { code: 'PS2RAC', romTitle: 'Midnight Club 3: DUB Edition Remix', hostName: 'Sofiane', players: 2, ready: true, ageSeconds: 420 },
-          ],
-          heartbeat: async () => ({ players: 2, memberToken: 'tok', memberHandle: 'hnd' }),
-          leaveSession: async () => {},
-          deleteSession: async () => {},
-          announcePresence: async () => {},
-          announceLastGame: async () => {},
-          friendStatuses: async () => ({
-            present: { 'ABC123XYZ456': { name: 'Alex', sessionCode: 'MK7WIN', romTitle: 'Mario Kart 7', players: 3, ready: true } },
-            names: { 'ABC123XYZ456': 'Alex', '789JKL012MNO': 'Lucas' },
-            avatars: {},
-            lastGames: { '789JKL012MNO': { title: 'Castlevania: Dracula X', at: Date.now() - 3600000 } }
-          }),
-          claimAddress: async (code) => ({
-            address: '10.67.12.2',
-            hairpinAddress: '10.67.12.254',
-            subnet: '10.67.12.0/24',
-            relayEndpoint: 'relay.emufii.xyz:51820',
-            relayPublicKey: 'xT1Z4uQ8N3/G6mK5Lp+9R2wE7vY=',
-            relayAllowedIps: '10.67.0.0/16'
-          }),
-        },
-        wireguard: {
-          up: async () => ({ isNativeActive: true }),
-          down: async () => {},
-          status: async () => ({ isTunnelUp: true, activeConfigPath: null }),
-        },
-        emulators: {
-          detectAll: async () => ({
-            PSP: { name: 'PPSSPP', console: 'PSP', isInstalled: true, executablePath: '/usr/bin/ppsspp' },
-            PS2: { name: 'PCSX2', console: 'PS2', isInstalled: true, executablePath: '/usr/bin/pcsx2-qt' },
-            '3DS': { name: 'Azahar', console: '3DS', isInstalled: true, executablePath: '/usr/bin/azahar' },
-            DS: { name: 'melonDS', console: 'DS', isInstalled: true, executablePath: '/usr/bin/melonds' },
-            Switch: { name: 'Eden', console: 'Switch', isInstalled: false },
-            GameCube: { name: 'Dolphin', console: 'GameCube / Wii', isInstalled: true, executablePath: '/usr/bin/dolphin-emu' },
-            Wii: { name: 'Dolphin', console: 'GameCube / Wii', isInstalled: true, executablePath: '/usr/bin/dolphin-emu' },
-          }),
-          launchGame: async (c, o) => ({ success: true, message: `Launched ${c} with ${o.romPath}` }),
-        }
-      };
-    }
-  </script>
+  <div class="drop-overlay" id="dropOverlay" aria-hidden="true">
+    <div class="drop-overlay-card">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <strong>Drop to add to your library</strong>
+      <span>Game files or whole folders</span>
+    </div>
+  </div>
 
   <script src="./main.js" type="module"></script>
 </body>

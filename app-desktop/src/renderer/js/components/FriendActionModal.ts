@@ -5,14 +5,9 @@ import {
   normalizeFriendCode,
   deriveFriendInboxId,
 } from '../../../main/profile/friendCode.js';
+import { esc as escapeHtml } from '../html.js';
+import { toast, errorMessage } from '../toast.js';
 
-function escapeHtml(str: string): string {
-  return String(str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 /**
  * Resolves detailed display name info for a friend.
@@ -173,7 +168,7 @@ export function confirmRemoveFriendModal(params: {
     `;
 
     const avatarHtml = avatar
-      ? `<img src="${avatar}" alt="${escapeHtml(name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`
+      ? `<img src="${escapeHtml(avatar)}" alt="" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`
       : `<span>${escapeHtml(name.slice(0, 2).toUpperCase())}</span>`;
 
     overlay.innerHTML = `
@@ -199,7 +194,7 @@ export function confirmRemoveFriendModal(params: {
               : ''
           }
           <div style="display: inline-block; font-family: var(--font-family); font-size: 12px; font-weight: 800; letter-spacing: 0.6px; color: var(--accent-bright); background: var(--plate-bg-low); padding: 4px 10px; border-radius: 9999px; border: 1px solid var(--plate-border);">
-            ${formattedCode}
+            ${escapeHtml(formattedCode)}
           </div>
         </div>
 
@@ -242,11 +237,6 @@ export function confirmRemoveFriendModal(params: {
         e.stopPropagation();
         sfx.play('click');
         cleanup(false);
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        e.stopPropagation();
-        sfx.play('confirm');
-        cleanup(true);
       }
     };
     window.addEventListener('keydown', onKeyDown, true);
@@ -352,7 +342,7 @@ export function promptRenameFriendModal(params: {
         e.stopPropagation();
         sfx.play('click');
         cleanup(null);
-      } else if (e.key === 'Enter') {
+      } else if (e.key === 'Enter' && e.target === input) {
         e.preventDefault();
         e.stopPropagation();
         sfx.play('confirm');
@@ -485,7 +475,7 @@ export function showFriendToast(params: {
   `;
 
   const avatarHtml = params.avatarUrl
-    ? `<img src="${params.avatarUrl}" alt="${escapeHtml(params.name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`
+    ? `<img src="${escapeHtml(params.avatarUrl)}" alt="" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;">`
     : `<span>${escapeHtml((params.name || 'F').slice(0, 2).toUpperCase())}</span>`;
 
   const hasActions = params.type === 'request' || params.type === 'invite';
@@ -997,7 +987,7 @@ export async function acceptSessionInvite(invite: {
     });
     store.navigate('session');
   } catch (err: any) {
-    alert('Could not join invited session: ' + (err?.message || 'Session ended'));
+    toast(`Could not join ${invite.code}: ${errorMessage(err, 'the session has ended')}`, 'error');
   }
 }
 
