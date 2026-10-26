@@ -53,7 +53,9 @@ export function setupIpc(
   const coordinator = new CoordinatorClient(initialConfig.settings.coordinatorUrl);
 
   const send = (channel: string, payload?: unknown) => {
-    if (!mainWindow.isDestroyed()) send(channel, payload);
+  if (!mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
   };
 
   // --- Window controls ---
