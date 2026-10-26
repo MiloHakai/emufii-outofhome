@@ -24,9 +24,9 @@
     "dist:mac": "npm run build && electron-builder --mac --x64 --arm64"
   },
   "devDependencies": {
-    "electron": "^33.2.1",
-    "electron-builder": "^25.1.8",
-    "esbuild": "^0.24.0",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.7.2"
   }
 }

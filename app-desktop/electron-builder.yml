@@ -31,10 +31,6 @@ linux:
         - arm64
   category: Game
   icon: build/icon.png
-  desktop:
-    Name: Emufii
-    Comment: Play your emulators online with friends
-    Categories: Game;Emulator;Network;
 
 win:
   target:
